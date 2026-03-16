@@ -21,7 +21,7 @@ const Footer = () => {
           </div>
 
           <p className="text-xs text-muted-foreground">
-            © {new Date().getFullYear()} DriveSub. Todos os direitos reservados.
+            © {new Date().getFullYear()} DrivioGo. Todos os direitos reservados.
           </p>
         </div>
       </div>
