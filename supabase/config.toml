@@ -1,0 +1,4 @@
+project_id = "vquerosktjtmawwqitsk"
+
+[functions.create-checkout]
+verify_jwt = false
