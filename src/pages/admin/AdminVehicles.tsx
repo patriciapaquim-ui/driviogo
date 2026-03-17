@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Search, Pencil, Trash2, ToggleLeft, ToggleRight, Car } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -12,35 +12,48 @@ import { ActiveBadge } from '@/components/admin/shared/StatusBadge';
 import { ConfirmationModal } from '@/components/admin/shared/ConfirmationModal';
 import { PageHeader } from '@/components/admin/shared/PageHeader';
 import { EmptyState } from '@/components/admin/shared/EmptyState';
+import { Pagination } from '@/components/admin/shared/Pagination';
 import { useVehicles } from '@/hooks/admin/useVehicles';
+import { usePagination } from '@/hooks/admin/usePagination';
 import { CATEGORY_LABELS, FUEL_LABELS } from '@/types/admin';
 import type { Vehicle, VehicleCategory } from '@/types/admin';
 
 const CATEGORIES: VehicleCategory[] = ['HATCH', 'SEDAN', 'SUV', 'PICKUP', 'MINIVAN', 'ESPORTIVO', 'ELETRICO'];
+const LIMIT = 15;
 
 export default function AdminVehicles() {
   const navigate = useNavigate();
-  const { vehicles, loading, deleteVehicle, toggleActive } = useVehicles();
 
-  const [search, setSearch] = useState('');
+  const [search,         setSearch]         = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [deleteTarget, setDeleteTarget] = useState<Vehicle | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  const [statusFilter,   setStatusFilter]   = useState<string>('all');
+  const [deleteTarget,   setDeleteTarget]   = useState<Vehicle | null>(null);
+  const [deleting,       setDeleting]       = useState(false);
 
-  const filtered = useMemo(() => {
-    return vehicles.filter((v) => {
-      const matchSearch =
-        !search ||
-        `${v.brand} ${v.model} ${v.version ?? ''}`.toLowerCase().includes(search.toLowerCase());
-      const matchCategory = categoryFilter === 'all' || v.category === categoryFilter;
-      const matchStatus =
-        statusFilter === 'all' ||
-        (statusFilter === 'active' && v.isActive) ||
-        (statusFilter === 'inactive' && !v.isActive);
-      return matchSearch && matchCategory && matchStatus;
-    });
-  }, [vehicles, search, categoryFilter, statusFilter]);
+  const { page, goToPage, resetPage } = usePagination();
+
+  const { vehicles, total, totalPages, loading, deleteVehicle, toggleActive } = useVehicles({
+    page,
+    limit:    LIMIT,
+    search:   search || undefined,
+    category: categoryFilter !== 'all' ? categoryFilter : undefined,
+    isActive: statusFilter === 'active' ? true : statusFilter === 'inactive' ? false : undefined,
+  });
+
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    resetPage();
+  };
+
+  const handleCategoryChange = (value: string) => {
+    setCategoryFilter(value);
+    resetPage();
+  };
+
+  const handleStatusChange = (value: string) => {
+    setStatusFilter(value);
+    resetPage();
+  };
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
@@ -57,7 +70,7 @@ export default function AdminVehicles() {
       <main className="flex-1 overflow-auto p-6">
         <PageHeader
           title="Catálogo de Veículos"
-          description={`${vehicles.length} veículo${vehicles.length !== 1 ? 's' : ''} cadastrado${vehicles.length !== 1 ? 's' : ''}`}
+          description={`${total} veículo${total !== 1 ? 's' : ''} cadastrado${total !== 1 ? 's' : ''}`}
           action={
             <Button onClick={() => navigate('/admin/veiculos/novo')} className="gap-2">
               <Plus className="w-4 h-4" />
@@ -73,11 +86,11 @@ export default function AdminVehicles() {
             <Input
               placeholder="Buscar por marca, modelo..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => handleSearchChange(e.target.value)}
               className="pl-9 bg-white"
             />
           </div>
-          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+          <Select value={categoryFilter} onValueChange={handleCategoryChange}>
             <SelectTrigger className="w-44 bg-white">
               <SelectValue placeholder="Categoria" />
             </SelectTrigger>
@@ -88,7 +101,7 @@ export default function AdminVehicles() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <Select value={statusFilter} onValueChange={handleStatusChange}>
             <SelectTrigger className="w-36 bg-white">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
@@ -115,7 +128,7 @@ export default function AdminVehicles() {
             </TableHeader>
             <TableBody>
               {loading ? (
-                Array.from({ length: 4 }).map((_, i) => (
+                Array.from({ length: 6 }).map((_, i) => (
                   <TableRow key={i}>
                     <TableCell><Skeleton className="w-10 h-10 rounded-lg" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-40" /></TableCell>
@@ -125,7 +138,7 @@ export default function AdminVehicles() {
                     <TableCell><Skeleton className="h-8 w-24 ml-auto" /></TableCell>
                   </TableRow>
                 ))
-              ) : filtered.length === 0 ? (
+              ) : vehicles.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6}>
                     <EmptyState
@@ -136,7 +149,7 @@ export default function AdminVehicles() {
                   </TableCell>
                 </TableRow>
               ) : (
-                filtered.map((vehicle) => {
+                vehicles.map((vehicle) => {
                   const mainImage = vehicle.images.find((i) => i.isMain) ?? vehicle.images[0];
                   return (
                     <TableRow key={vehicle.id} className="hover:bg-slate-50/60">
@@ -214,11 +227,13 @@ export default function AdminVehicles() {
           </Table>
         </div>
 
-        {filtered.length > 0 && (
-          <p className="text-xs text-slate-400 mt-3">
-            Mostrando {filtered.length} de {vehicles.length} veículos
-          </p>
-        )}
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          total={total}
+          limit={LIMIT}
+          onPage={goToPage}
+        />
       </main>
 
       <ConfirmationModal

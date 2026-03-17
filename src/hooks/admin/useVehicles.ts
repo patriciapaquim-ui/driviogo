@@ -1,78 +1,100 @@
-import { useState, useCallback } from 'react';
-import { MOCK_VEHICLES } from '@/lib/admin/mockData';
-import type { Vehicle, VehicleFormData } from '@/types/admin';
+// =============================================================================
+// DrivioGo — useVehicles hook (React Query)
+// =============================================================================
+
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import * as vehicleService from '@/services/admin/vehicleService';
+import type { VehicleFilters } from '@/services/admin/vehicleService';
+import type { VehicleFormData } from '@/types/admin';
 
-// ---------------------------------------------------------------------------
-// In development, operations run against mock data in memory.
-// Replace with real Supabase calls after running the admin migration.
-// ---------------------------------------------------------------------------
+export type { VehicleFilters };
 
-let vehiclesStore = [...MOCK_VEHICLES];
+export function useVehicles(filters: VehicleFilters = {}) {
+  const qc = useQueryClient();
 
-export function useVehicles() {
-  const [vehicles, setVehicles] = useState<Vehicle[]>(vehiclesStore);
-  const [loading, setLoading] = useState(false);
+  const query = useQuery({
+    queryKey: ['admin', 'vehicles', filters],
+    queryFn:  () => vehicleService.listVehicles(filters),
+    staleTime: 30_000,
+  });
 
-  const refresh = useCallback(() => {
-    setLoading(true);
-    setTimeout(() => {
-      setVehicles([...vehiclesStore]);
-      setLoading(false);
-    }, 300);
-  }, []);
+  const invalidate = () =>
+    qc.invalidateQueries({ queryKey: ['admin', 'vehicles'] });
 
-  const createVehicle = useCallback(async (data: VehicleFormData): Promise<Vehicle | null> => {
-    setLoading(true);
-    await new Promise((r) => setTimeout(r, 500));
-    const newVehicle: Vehicle = {
-      ...data,
-      id: `v${Date.now()}`,
-      images: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    vehiclesStore = [newVehicle, ...vehiclesStore];
-    setVehicles([...vehiclesStore]);
-    setLoading(false);
-    toast.success('Veículo cadastrado com sucesso!');
-    return newVehicle;
-  }, []);
+  const createMutation = useMutation({
+    mutationFn: vehicleService.createVehicle,
+    onSuccess: () => {
+      invalidate();
+      toast.success('Veículo cadastrado com sucesso!');
+    },
+    onError: (e: Error) => toast.error(`Erro ao cadastrar: ${e.message}`),
+  });
 
-  const updateVehicle = useCallback(async (id: string, data: Partial<VehicleFormData>): Promise<boolean> => {
-    setLoading(true);
-    await new Promise((r) => setTimeout(r, 400));
-    vehiclesStore = vehiclesStore.map((v) =>
-      v.id === id ? { ...v, ...data, updatedAt: new Date().toISOString() } : v
-    );
-    setVehicles([...vehiclesStore]);
-    setLoading(false);
-    toast.success('Veículo atualizado com sucesso!');
-    return true;
-  }, []);
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<VehicleFormData> }) =>
+      vehicleService.updateVehicle(id, data),
+    onSuccess: () => {
+      invalidate();
+      toast.success('Veículo atualizado com sucesso!');
+    },
+    onError: (e: Error) => toast.error(`Erro ao atualizar: ${e.message}`),
+  });
 
-  const deleteVehicle = useCallback(async (id: string): Promise<boolean> => {
-    setLoading(true);
-    await new Promise((r) => setTimeout(r, 400));
-    vehiclesStore = vehiclesStore.filter((v) => v.id !== id);
-    setVehicles([...vehiclesStore]);
-    setLoading(false);
-    toast.success('Veículo excluído com sucesso!');
-    return true;
-  }, []);
+  const deleteMutation = useMutation({
+    mutationFn: vehicleService.deleteVehicle,
+    onSuccess: () => {
+      invalidate();
+      toast.success('Veículo excluído com sucesso!');
+    },
+    onError: (e: Error) => toast.error(`Erro ao excluir: ${e.message}`),
+  });
 
-  const toggleActive = useCallback(async (id: string, isActive: boolean): Promise<boolean> => {
-    vehiclesStore = vehiclesStore.map((v) =>
-      v.id === id ? { ...v, isActive, updatedAt: new Date().toISOString() } : v
-    );
-    setVehicles([...vehiclesStore]);
-    toast.success(isActive ? 'Veículo ativado!' : 'Veículo desativado!');
-    return true;
-  }, []);
+  const toggleMutation = useMutation({
+    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) =>
+      vehicleService.toggleVehicleActive(id, isActive),
+    onSuccess: (_data, { isActive }) => {
+      invalidate();
+      toast.success(isActive ? 'Veículo ativado!' : 'Veículo desativado!');
+    },
+    onError: (e: Error) => toast.error(`Erro: ${e.message}`),
+  });
 
-  const getById = useCallback((id: string): Vehicle | undefined => {
-    return vehiclesStore.find((v) => v.id === id);
-  }, []);
+  return {
+    vehicles:   query.data?.vehicles ?? [],
+    total:      query.data?.total      ?? 0,
+    page:       query.data?.page       ?? 1,
+    totalPages: query.data?.totalPages ?? 1,
+    loading:    query.isLoading,
+    error:      query.error,
 
-  return { vehicles, loading, refresh, createVehicle, updateVehicle, deleteVehicle, toggleActive, getById };
+    createVehicle: (data: VehicleFormData) => createMutation.mutateAsync(data),
+    updateVehicle: (id: string, data: Partial<VehicleFormData>) =>
+      updateMutation.mutateAsync({ id, data }),
+    deleteVehicle: (id: string) => deleteMutation.mutateAsync(id),
+    toggleActive:  (id: string, isActive: boolean) =>
+      toggleMutation.mutateAsync({ id, isActive }),
+
+    isCreating: createMutation.isPending,
+    isUpdating: updateMutation.isPending,
+    isDeleting: deleteMutation.isPending,
+  };
+}
+
+/** Fetch a single vehicle by id (used in edit form). */
+export function useVehicle(id: string | undefined) {
+  return useQuery({
+    queryKey: ['admin', 'vehicle', id],
+    queryFn:  () => vehicleService.getVehicleById(id!),
+    enabled:  !!id,
+    staleTime: 60_000,
+  });
+}
+
+export function useVehicleStats() {
+  return useQuery({
+    queryKey: ['admin', 'vehicleStats'],
+    queryFn:  vehicleService.getVehicleStats,
+    staleTime: 60_000,
+  });
 }

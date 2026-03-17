@@ -2,20 +2,25 @@ import { useNavigate } from 'react-router-dom';
 import { Car, Tag, Upload, TrendingUp, CheckCircle2, AlertCircle, Clock } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { AdminLayout } from '@/components/admin/layout/AdminLayout';
 import { AdminHeader } from '@/components/admin/layout/AdminHeader';
 import { ImportStatusBadge, AuditActionBadge } from '@/components/admin/shared/StatusBadge';
-import { MOCK_DASHBOARD_STATS } from '@/lib/admin/mockData';
+import { useDashboard } from '@/hooks/admin/useDashboard';
 import { ENTITY_TYPE_LABELS } from '@/types/admin';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
+const formatDate = (iso: string) =>
+  formatDistanceToNow(new Date(iso), { addSuffix: true, locale: ptBR });
+
 export default function AdminDashboard() {
   const navigate = useNavigate();
-  const stats = MOCK_DASHBOARD_STATS;
-
-  const formatDate = (iso: string) =>
-    formatDistanceToNow(new Date(iso), { addSuffix: true, locale: ptBR });
+  const {
+    activeVehicles, inactiveVehicles, totalVehicles,
+    activePricingTable, activePricingVersion,
+    lastImport, recentAuditLogs, loading,
+  } = useDashboard();
 
   return (
     <AdminLayout>
@@ -33,10 +38,16 @@ export default function AdminDashboard() {
                   <Car className="w-4 h-4 text-emerald-600" />
                 </div>
               </div>
-              <p className="text-3xl font-bold text-slate-900">{stats.activeVehicles}</p>
-              <p className="text-xs text-slate-400 mt-1">
-                {stats.inactiveVehicles} inativo{stats.inactiveVehicles !== 1 ? 's' : ''}
-              </p>
+              {loading ? (
+                <Skeleton className="h-8 w-16 mb-1" />
+              ) : (
+                <>
+                  <p className="text-3xl font-bold text-slate-900">{activeVehicles}</p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {inactiveVehicles} inativo{inactiveVehicles !== 1 ? 's' : ''}
+                  </p>
+                </>
+              )}
             </CardContent>
           </Card>
 
@@ -48,8 +59,14 @@ export default function AdminDashboard() {
                   <TrendingUp className="w-4 h-4 text-blue-600" />
                 </div>
               </div>
-              <p className="text-3xl font-bold text-slate-900">{stats.totalVehicles}</p>
-              <p className="text-xs text-slate-400 mt-1">no catálogo</p>
+              {loading ? (
+                <Skeleton className="h-8 w-16 mb-1" />
+              ) : (
+                <>
+                  <p className="text-3xl font-bold text-slate-900">{totalVehicles}</p>
+                  <p className="text-xs text-slate-400 mt-1">no catálogo</p>
+                </>
+              )}
             </CardContent>
           </Card>
 
@@ -61,11 +78,17 @@ export default function AdminDashboard() {
                   <Tag className="w-4 h-4 text-violet-600" />
                 </div>
               </div>
-              <p className="text-lg font-bold text-slate-900 leading-tight">
-                {stats.activePricingTable ?? '—'}
-              </p>
-              {stats.activePricingVersion && (
-                <p className="text-xs text-slate-400 mt-1">versão {stats.activePricingVersion}</p>
+              {loading ? (
+                <Skeleton className="h-6 w-28 mb-1" />
+              ) : (
+                <>
+                  <p className="text-lg font-bold text-slate-900 leading-tight">
+                    {activePricingTable ?? '—'}
+                  </p>
+                  {activePricingVersion && (
+                    <p className="text-xs text-slate-400 mt-1">versão {activePricingVersion}</p>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
@@ -78,12 +101,12 @@ export default function AdminDashboard() {
                   <Upload className="w-4 h-4 text-amber-600" />
                 </div>
               </div>
-              {stats.lastImport ? (
+              {loading ? (
+                <Skeleton className="h-6 w-20" />
+              ) : lastImport ? (
                 <>
-                  <ImportStatusBadge status={stats.lastImport.status} />
-                  <p className="text-xs text-slate-400 mt-2">
-                    {formatDate(stats.lastImport.createdAt)}
-                  </p>
+                  <ImportStatusBadge status={lastImport.status} />
+                  <p className="text-xs text-slate-400 mt-2">{formatDate(lastImport.createdAt)}</p>
                 </>
               ) : (
                 <p className="text-sm text-slate-400">Nenhuma importação</p>
@@ -125,33 +148,33 @@ export default function AdminDashboard() {
               </Button>
             </CardHeader>
             <CardContent>
-              <div className="space-y-3">
-                {MOCK_DASHBOARD_STATS.lastImport ? (
-                  [{...MOCK_DASHBOARD_STATS.lastImport}].map((job) => (
-                    <div key={job.id} className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0">
-                      <div className="flex items-center gap-3 min-w-0">
-                        {job.status === 'SUCCESS' ? (
-                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                        ) : job.status === 'FAILED' ? (
-                          <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
-                        ) : (
-                          <Clock className="w-4 h-4 text-amber-500 shrink-0" />
-                        )}
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium text-slate-700 truncate">{job.fileName}</p>
-                          <p className="text-xs text-slate-400">por {job.createdByName}</p>
-                        </div>
-                      </div>
-                      <div className="text-right shrink-0 ml-3">
-                        <ImportStatusBadge status={job.status} />
-                        <p className="text-xs text-slate-400 mt-1">{formatDate(job.createdAt)}</p>
-                      </div>
+              {loading ? (
+                <div className="space-y-3">
+                  {[1, 2].map((i) => <Skeleton key={i} className="h-10 w-full" />)}
+                </div>
+              ) : lastImport ? (
+                <div className="flex items-center justify-between py-2">
+                  <div className="flex items-center gap-3 min-w-0">
+                    {lastImport.status === 'SUCCESS' ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                    ) : lastImport.status === 'FAILED' ? (
+                      <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                    ) : (
+                      <Clock className="w-4 h-4 text-amber-500 shrink-0" />
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-700 truncate">{lastImport.fileName}</p>
+                      <p className="text-xs text-slate-400">por {lastImport.createdByName ?? '—'}</p>
                     </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-slate-400 py-4 text-center">Nenhuma importação ainda.</p>
-                )}
-              </div>
+                  </div>
+                  <div className="text-right shrink-0 ml-3">
+                    <ImportStatusBadge status={lastImport.status} />
+                    <p className="text-xs text-slate-400 mt-1">{formatDate(lastImport.createdAt)}</p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-slate-400 py-4 text-center">Nenhuma importação ainda.</p>
+              )}
             </CardContent>
           </Card>
 
@@ -164,24 +187,32 @@ export default function AdminDashboard() {
               </Button>
             </CardHeader>
             <CardContent>
-              <div className="space-y-1">
-                {stats.recentAuditLogs.map((log) => (
-                  <div key={log.id} className="flex items-start gap-3 py-2 border-b border-slate-100 last:border-0">
-                    <AuditActionBadge action={log.action} className="mt-0.5 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-slate-700">
-                        <span className="font-medium">{log.adminUserName}</span>{' '}
-                        {log.entityLabel && (
-                          <span className="text-slate-500">— {log.entityLabel}</span>
-                        )}
-                      </p>
-                      <p className="text-xs text-slate-400">
-                        {ENTITY_TYPE_LABELS[log.entityType] ?? log.entityType} · {formatDate(log.createdAt)}
-                      </p>
+              {loading ? (
+                <div className="space-y-2">
+                  {[1, 2, 3].map((i) => <Skeleton key={i} className="h-9 w-full" />)}
+                </div>
+              ) : recentAuditLogs.length === 0 ? (
+                <p className="text-sm text-slate-400 py-4 text-center">Nenhuma atividade recente.</p>
+              ) : (
+                <div className="space-y-1">
+                  {recentAuditLogs.map((log) => (
+                    <div key={log.id} className="flex items-start gap-3 py-2 border-b border-slate-100 last:border-0">
+                      <AuditActionBadge action={log.action} className="mt-0.5 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-slate-700">
+                          <span className="font-medium">{log.adminUserName}</span>{' '}
+                          {log.entityLabel && (
+                            <span className="text-slate-500">— {log.entityLabel}</span>
+                          )}
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          {ENTITY_TYPE_LABELS[log.entityType] ?? log.entityType} · {formatDate(log.createdAt)}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

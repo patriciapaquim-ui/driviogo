@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, CheckCircle2, History, Tag, TrendingUp } from 'lucide-react';
+import { Upload, CheckCircle2, History, Tag, TrendingUp, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -10,7 +11,9 @@ import { AdminLayout } from '@/components/admin/layout/AdminLayout';
 import { AdminHeader } from '@/components/admin/layout/AdminHeader';
 import { PageHeader } from '@/components/admin/shared/PageHeader';
 import { EmptyState } from '@/components/admin/shared/EmptyState';
-import { usePricing } from '@/hooks/admin/usePricing';
+import { ConfirmationModal } from '@/components/admin/shared/ConfirmationModal';
+import { usePricing, useVersionRules, useActivateVersion } from '@/hooks/admin/usePricing';
+import type { PricingTableVersion } from '@/types/admin';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -23,6 +26,16 @@ const formatDate = (iso: string) =>
 export default function AdminPricing() {
   const navigate = useNavigate();
   const { pricingTable, activeVersion, loading } = usePricing();
+  const { data: rules = [], isLoading: loadingRules } = useVersionRules(activeVersion?.id);
+  const activateMutation = useActivateVersion();
+
+  const [activateTarget, setActivateTarget] = useState<PricingTableVersion | null>(null);
+
+  const handleActivate = async () => {
+    if (!activateTarget) return;
+    await activateMutation.mutateAsync(activateTarget.id);
+    setActivateTarget(null);
+  };
 
   return (
     <AdminLayout>
@@ -46,7 +59,7 @@ export default function AdminPricing() {
         {/* Active table info */}
         {loading ? (
           <Skeleton className="h-28 w-full rounded-xl mb-6" />
-        ) : (
+        ) : pricingTable ? (
           <Card className="border-0 shadow-sm mb-6 bg-emerald-50 border-emerald-200">
             <CardContent className="p-5">
               <div className="flex items-start gap-4">
@@ -77,12 +90,16 @@ export default function AdminPricing() {
               </div>
             </CardContent>
           </Card>
-        )}
+        ) : null}
 
         {/* Pricing rules table */}
-        {activeVersion && activeVersion.rules.length > 0 ? (
+        {loadingRules ? (
+          <div className="space-y-4">
+            {[1, 2].map((i) => <Skeleton key={i} className="h-40 w-full rounded-xl" />)}
+          </div>
+        ) : rules.length > 0 ? (
           <div className="space-y-6">
-            {activeVersion.rules.map((rule) => (
+            {rules.map((rule) => (
               <Card key={rule.id} className="border-0 shadow-sm overflow-hidden">
                 <CardHeader className="pb-3 bg-slate-50 border-b border-slate-100">
                   <div className="flex items-center justify-between">
@@ -146,7 +163,7 @@ export default function AdminPricing() {
         ) : null}
 
         {/* Version history */}
-        {pricingTable.versions.length > 1 && (
+        {pricingTable && pricingTable.versions.length > 1 && (
           <div className="mt-8">
             <Separator className="mb-6" />
             <div className="flex items-center gap-2 mb-4">
@@ -177,9 +194,22 @@ export default function AdminPricing() {
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <TrendingUp className="w-3.5 h-3.5 text-slate-300" />
-                    <span className="text-xs text-slate-400">v{version.versionNumber}</span>
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-1.5">
+                      <TrendingUp className="w-3.5 h-3.5 text-slate-300" />
+                      <span className="text-xs text-slate-400">v{version.versionNumber}</span>
+                    </div>
+                    {!version.isActive && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5 text-xs h-7"
+                        onClick={() => setActivateTarget(version)}
+                      >
+                        <Zap className="w-3 h-3" />
+                        Ativar
+                      </Button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -187,6 +217,21 @@ export default function AdminPricing() {
           </div>
         )}
       </main>
+
+      <ConfirmationModal
+        open={!!activateTarget}
+        onClose={() => setActivateTarget(null)}
+        onConfirm={handleActivate}
+        title="Ativar versão de preços"
+        description={
+          activateTarget
+            ? `Tem certeza que deseja ativar "${activateTarget.label ?? `Versão ${activateTarget.versionNumber}`}"? A versão atual será desativada e os preços do site serão atualizados imediatamente.`
+            : ''
+        }
+        confirmLabel="Sim, ativar agora"
+        variant="default"
+        loading={activateMutation.isPending}
+      />
     </AdminLayout>
   );
 }

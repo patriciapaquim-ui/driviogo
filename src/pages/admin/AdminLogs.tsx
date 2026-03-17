@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { ClipboardList, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -9,41 +9,56 @@ import { AdminHeader } from '@/components/admin/layout/AdminHeader';
 import { AuditActionBadge } from '@/components/admin/shared/StatusBadge';
 import { PageHeader } from '@/components/admin/shared/PageHeader';
 import { EmptyState } from '@/components/admin/shared/EmptyState';
+import { Pagination } from '@/components/admin/shared/Pagination';
 import { useAuditLogs } from '@/hooks/admin/useAuditLogs';
+import { usePagination } from '@/hooks/admin/usePagination';
 import { ENTITY_TYPE_LABELS, AUDIT_ACTION_LABELS } from '@/types/admin';
 import type { AuditAction } from '@/types/admin';
+import { useDebounce } from '@/hooks/use-debounce';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+
+const LIMIT = 20;
 
 const ACTIONS: AuditAction[] = [
   'CREATE', 'UPDATE', 'DELETE', 'ACTIVATE', 'DEACTIVATE', 'IMPORT', 'LOGIN', 'LOGOUT',
 ];
 
+const ENTITY_TYPES = ['vehicle', 'pricing_table', 'pricing_version', 'import_job', 'admin_user'];
+
 const formatDate = (iso: string) =>
   format(new Date(iso), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR });
 
 export default function AdminLogs() {
-  const { logs, loading } = useAuditLogs();
-  const [search, setSearch] = useState('');
+  const [searchInput,  setSearchInput]  = useState('');
   const [actionFilter, setActionFilter] = useState<string>('all');
   const [entityFilter, setEntityFilter] = useState<string>('all');
 
-  const entityTypes = useMemo(
-    () => [...new Set(logs.map((l) => l.entityType))],
-    [logs]
-  );
+  const search = useDebounce(searchInput, 400);
+  const { page, goToPage, resetPage } = usePagination();
 
-  const filtered = useMemo(() => {
-    return logs.filter((log) => {
-      const matchSearch =
-        !search ||
-        log.adminUserName?.toLowerCase().includes(search.toLowerCase()) ||
-        log.entityLabel?.toLowerCase().includes(search.toLowerCase());
-      const matchAction = actionFilter === 'all' || log.action === actionFilter;
-      const matchEntity = entityFilter === 'all' || log.entityType === entityFilter;
-      return matchSearch && matchAction && matchEntity;
-    });
-  }, [logs, search, actionFilter, entityFilter]);
+  const { logs, total, totalPages, loading } = useAuditLogs({
+    page,
+    limit:      LIMIT,
+    search:     search || undefined,
+    action:     actionFilter !== 'all' ? actionFilter : undefined,
+    entityType: entityFilter !== 'all' ? entityFilter : undefined,
+  });
+
+  const handleSearchChange = (value: string) => {
+    setSearchInput(value);
+    resetPage();
+  };
+
+  const handleActionChange = (value: string) => {
+    setActionFilter(value);
+    resetPage();
+  };
+
+  const handleEntityChange = (value: string) => {
+    setEntityFilter(value);
+    resetPage();
+  };
 
   return (
     <AdminLayout>
@@ -64,12 +79,12 @@ export default function AdminLogs() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <Input
               placeholder="Buscar por usuário ou item..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              value={searchInput}
+              onChange={(e) => handleSearchChange(e.target.value)}
               className="pl-9 bg-white"
             />
           </div>
-          <Select value={actionFilter} onValueChange={setActionFilter}>
+          <Select value={actionFilter} onValueChange={handleActionChange}>
             <SelectTrigger className="w-44 bg-white">
               <SelectValue placeholder="Tipo de ação" />
             </SelectTrigger>
@@ -80,13 +95,13 @@ export default function AdminLogs() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={entityFilter} onValueChange={setEntityFilter}>
+          <Select value={entityFilter} onValueChange={handleEntityChange}>
             <SelectTrigger className="w-44 bg-white">
               <SelectValue placeholder="Área do sistema" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todas as áreas</SelectItem>
-              {entityTypes.map((e) => (
+              {ENTITY_TYPES.map((e) => (
                 <SelectItem key={e} value={e}>{ENTITY_TYPE_LABELS[e] ?? e}</SelectItem>
               ))}
             </SelectContent>
@@ -107,7 +122,7 @@ export default function AdminLogs() {
             </TableHeader>
             <TableBody>
               {loading ? (
-                Array.from({ length: 5 }).map((_, i) => (
+                Array.from({ length: 6 }).map((_, i) => (
                   <TableRow key={i}>
                     <TableCell><Skeleton className="h-4 w-28" /></TableCell>
                     <TableCell><Skeleton className="h-5 w-16 rounded-full" /></TableCell>
@@ -116,7 +131,7 @@ export default function AdminLogs() {
                     <TableCell><Skeleton className="h-4 w-28" /></TableCell>
                   </TableRow>
                 ))
-              ) : filtered.length === 0 ? (
+              ) : logs.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5}>
                     <EmptyState
@@ -127,7 +142,7 @@ export default function AdminLogs() {
                   </TableCell>
                 </TableRow>
               ) : (
-                filtered.map((log) => (
+                logs.map((log) => (
                   <TableRow key={log.id} className="hover:bg-slate-50/60">
                     <TableCell>
                       <p className="text-sm font-medium text-slate-700">{log.adminUserName ?? '—'}</p>
@@ -148,7 +163,7 @@ export default function AdminLogs() {
                         <p className="text-xs text-slate-400 mt-0.5">
                           {Object.keys(log.changes.after).map((k) => {
                             const before = String(log.changes!.before![k] ?? '');
-                            const after = String(log.changes!.after![k] ?? '');
+                            const after  = String(log.changes!.after![k]  ?? '');
                             return before !== after ? `${k}: ${before} → ${after}` : null;
                           }).filter(Boolean).join(' · ')}
                         </p>
@@ -164,11 +179,13 @@ export default function AdminLogs() {
           </Table>
         </div>
 
-        {filtered.length > 0 && (
-          <p className="text-xs text-slate-400 mt-3">
-            {filtered.length} registro{filtered.length !== 1 ? 's' : ''} encontrado{filtered.length !== 1 ? 's' : ''}
-          </p>
-        )}
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          total={total}
+          limit={LIMIT}
+          onPage={goToPage}
+        />
       </main>
     </AdminLayout>
   );
