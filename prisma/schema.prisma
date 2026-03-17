@@ -1,0 +1,339 @@
+// =============================================================================
+// DrivioGo — Prisma Schema — Módulo Admin
+// =============================================================================
+// Este schema é a referência canônica do modelo de dados do módulo admin.
+// Pode ser usado diretamente com NestJS + Prisma ou convertido para
+// migrations SQL para o Supabase (via prisma migrate diff).
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// ENUMS
+// =============================================================================
+
+enum AdminRole {
+  SUPER_ADMIN
+  ADMIN
+  VIEWER
+}
+
+enum VehicleCategory {
+  HATCH
+  SEDAN
+  SUV
+  PICKUP
+  MINIVAN
+  ESPORTIVO
+  ELETRICO
+}
+
+enum VehicleTransmission {
+  MANUAL
+  AUTOMATICO
+  CVT
+}
+
+enum VehicleFuel {
+  FLEX
+  GASOLINA
+  DIESEL
+  ELETRICO
+  HIBRIDO
+}
+
+enum ImportJobStatus {
+  PENDING
+  PROCESSING
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
+enum ImportRowStatus {
+  PENDING
+  SUCCESS
+  ERROR
+  SKIPPED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  ACTIVATE
+  DEACTIVATE
+  IMPORT
+  LOGIN
+  LOGOUT
+  PASSWORD_CHANGE
+}
+
+// =============================================================================
+// ADMIN USER
+// =============================================================================
+
+/// Usuário administrativo da plataforma DrivioGo.
+/// O campo `id` referencia `auth.users.id` do Supabase (mesmo UUID).
+model AdminUser {
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String    @unique @db.VarChar(255)
+  name         String    @db.VarChar(255)
+  role         AdminRole @default(VIEWER)
+  isActive     Boolean   @default(true) @map("is_active")
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  // Relacionamentos
+  importJobs           ImportJob[]
+  pricingTableVersions PricingTableVersion[]
+  auditLogs            AuditLog[]
+
+  @@index([role])
+  @@index([isActive])
+  @@map("admin_users")
+}
+
+// =============================================================================
+// VEHICLE
+// =============================================================================
+
+/// Veículo disponível no catálogo para assinatura.
+model Vehicle {
+  id           String              @id @default(uuid()) @db.Uuid
+  brand        String              @db.VarChar(100)
+  model        String              @db.VarChar(100)
+  year         Int                 @db.SmallInt
+  version      String?             @db.VarChar(150) // ex: "1.0 Turbo Flex Automático"
+  category     VehicleCategory
+  transmission VehicleTransmission
+  fuel         VehicleFuel
+  color        String?             @db.VarChar(80)
+  seats        Int                 @default(5) @db.SmallInt
+  doors        Int                 @default(4) @db.SmallInt
+  description  String?             @db.Text
+  features     String[]            // Array de features (ar-cond, câmera de ré, etc.)
+  isActive     Boolean             @default(true) @map("is_active")
+  isFeatured   Boolean             @default(false) @map("is_featured")
+  featuredOrder Int?               @map("featured_order") @db.SmallInt
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+
+  // Relacionamentos
+  images       VehicleImage[]
+  pricingRules VehiclePricingRule[]
+
+  @@index([isActive, category])
+  @@index([isFeatured, featuredOrder])
+  @@index([brand, model, year])
+  @@map("vehicles")
+}
+
+/// Imagem de um veículo. Um veículo pode ter múltiplas imagens.
+model VehicleImage {
+  id           String   @id @default(uuid()) @db.Uuid
+  vehicleId    String   @map("vehicle_id") @db.Uuid
+  url          String   @db.Text          // URL no Supabase Storage
+  altText      String?  @map("alt_text") @db.VarChar(255)
+  displayOrder Int      @default(0) @map("display_order") @db.SmallInt
+  isMain       Boolean  @default(false) @map("is_main")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  // Relacionamentos
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@unique([vehicleId, displayOrder])
+  @@index([vehicleId])
+  @@index([vehicleId, isMain])
+  @@map("vehicle_images")
+}
+
+// =============================================================================
+// PRICING TABLE
+// =============================================================================
+
+/// Tabela de preços com nome e descrição.
+/// Pode ter múltiplas versões. Apenas uma versão pode estar ativa por vez.
+model PricingTable {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(255)    // ex: "Tabela Março 2026"
+  description String?  @db.Text
+  isActive    Boolean  @default(false) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relacionamentos
+  versions PricingTableVersion[]
+
+  @@index([isActive])
+  @@index([name])
+  @@map("pricing_tables")
+}
+
+/// Versão imutável de uma tabela de preços.
+/// Uma vez criada, seus dados não devem ser alterados — crie uma nova versão.
+/// Gerada por importação Excel ou criada manualmente.
+model PricingTableVersion {
+  id             String    @id @default(uuid()) @db.Uuid
+  pricingTableId String    @map("pricing_table_id") @db.Uuid
+  versionNumber  Int       @map("version_number")   // incrementado automaticamente
+  label          String?   @db.VarChar(255)          // ex: "v3 — Reajuste Abril"
+  notes          String?   @db.Text
+  isActive       Boolean   @default(false) @map("is_active")
+  activatedAt    DateTime? @map("activated_at")
+  deactivatedAt  DateTime? @map("deactivated_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  createdById    String    @map("created_by") @db.Uuid
+  importJobId    String?   @map("import_job_id") @db.Uuid  // null se criado manualmente
+
+  // Relacionamentos
+  pricingTable PricingTable         @relation(fields: [pricingTableId], references: [id])
+  createdBy    AdminUser            @relation(fields: [createdById], references: [id])
+  importJob    ImportJob?           @relation(fields: [importJobId], references: [id])
+  rules        VehiclePricingRule[]
+
+  @@unique([pricingTableId, versionNumber])
+  @@index([pricingTableId, isActive])
+  @@index([isActive])
+  @@map("pricing_table_versions")
+}
+
+/// Regra de preço para um veículo específico + prazo contratual.
+/// Contém os valores fixos (excedente, monitoramento, carro reserva).
+/// As 7 opções de KM e seus preços ficam em `AnnualKmOption`.
+model VehiclePricingRule {
+  id                     String   @id @default(uuid()) @db.Uuid
+  pricingTableVersionId  String   @map("pricing_table_version_id") @db.Uuid
+  vehicleId              String   @map("vehicle_id") @db.Uuid
+  contractDurationMonths Int      @map("contract_duration_months") @db.SmallInt // 12, 24, 36, 48
+  excessKmValue          Decimal  @map("excess_km_value") @db.Decimal(10, 2)   // R$/km excedente
+  monitoringValue        Decimal  @map("monitoring_value") @db.Decimal(10, 2)  // R$/mês
+  reserveCarValue        Decimal  @map("reserve_car_value") @db.Decimal(10, 2) // R$/mês
+  createdAt              DateTime @default(now()) @map("created_at")
+
+  // Relacionamentos
+  pricingTableVersion PricingTableVersion @relation(fields: [pricingTableVersionId], references: [id], onDelete: Cascade)
+  vehicle             Vehicle             @relation(fields: [vehicleId], references: [id])
+  kmOptions           AnnualKmOption[]
+
+  @@unique([pricingTableVersionId, vehicleId, contractDurationMonths])
+  @@index([pricingTableVersionId])
+  @@index([vehicleId])
+  @@map("vehicle_pricing_rules")
+}
+
+/// Uma das 7 opções de KM anual para uma regra de preço.
+/// O `monthly_price` é o preço base mensal para aquela quilometragem.
+///
+/// Preço final ao usuário:
+///   monthly_price + monitoring_value + reserve_car_value
+model AnnualKmOption {
+  id                   String   @id @default(uuid()) @db.Uuid
+  vehiclePricingRuleId String   @map("vehicle_pricing_rule_id") @db.Uuid
+  annualKm             Int      @map("annual_km")             // ex: 10000, 15000, ..., 40000
+  monthlyPrice         Decimal  @map("monthly_price") @db.Decimal(10, 2)
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  // Relacionamentos
+  vehiclePricingRule VehiclePricingRule @relation(fields: [vehiclePricingRuleId], references: [id], onDelete: Cascade)
+
+  @@unique([vehiclePricingRuleId, annualKm])
+  @@index([vehiclePricingRuleId])
+  @@map("annual_km_options")
+}
+
+// =============================================================================
+// IMPORT JOB
+// =============================================================================
+
+/// Registro de importação de planilha Excel.
+/// Rastreia o arquivo, status, progresso e resultado.
+model ImportJob {
+  id                   String          @id @default(uuid()) @db.Uuid
+  fileName             String          @map("file_name") @db.VarChar(500)
+  fileUrl              String          @map("file_url") @db.Text     // URL no Supabase Storage
+  fileSize             Int?            @map("file_size")              // bytes
+  status               ImportJobStatus @default(PENDING)
+  totalRows            Int             @default(0) @map("total_rows")
+  processedRows        Int             @default(0) @map("processed_rows")
+  successRows          Int             @default(0) @map("success_rows")
+  errorRows            Int             @default(0) @map("error_rows")
+  errorSummary         String?         @map("error_summary") @db.Text
+  createdById          String          @map("created_by") @db.Uuid
+  startedAt            DateTime?       @map("started_at")
+  completedAt          DateTime?       @map("completed_at")
+  createdAt            DateTime        @default(now()) @map("created_at")
+
+  // Relacionamentos
+  createdBy            AdminUser             @relation(fields: [createdById], references: [id])
+  rows                 ImportJobRow[]
+  pricingTableVersions PricingTableVersion[] // versão criada a partir desta importação
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([createdById])
+  @@map("import_jobs")
+}
+
+/// Linha individual de uma planilha importada.
+/// Preserva os dados brutos e o resultado do processamento.
+model ImportJobRow {
+  id                    String          @id @default(uuid()) @db.Uuid
+  importJobId           String          @map("import_job_id") @db.Uuid
+  rowNumber             Int             @map("row_number")
+  vehicleName           String          @map("vehicle_name") @db.VarChar(255)
+  contractDurationMonths Int            @map("contract_duration_months") @db.SmallInt
+  /// JSONB: [{ annualKm: number, monthlyPrice: number }, ...]  — 7 elementos
+  annualKmOptions       Json            @map("annual_km_options")
+  excessKmValue         Decimal?        @map("excess_km_value") @db.Decimal(10, 2)
+  monitoringValue       Decimal?        @map("monitoring_value") @db.Decimal(10, 2)
+  reserveCarValue       Decimal?        @map("reserve_car_value") @db.Decimal(10, 2)
+  rawData               Json?           @map("raw_data")              // dados brutos da linha
+  status                ImportRowStatus @default(PENDING)
+  errorMessage          String?         @map("error_message") @db.Text
+  createdAt             DateTime        @default(now()) @map("created_at")
+
+  // Relacionamentos
+  importJob ImportJob @relation(fields: [importJobId], references: [id], onDelete: Cascade)
+
+  @@index([importJobId, status])
+  @@index([importJobId, rowNumber])
+  @@map("import_job_rows")
+}
+
+// =============================================================================
+// AUDIT LOG
+// =============================================================================
+
+/// Log imutável de todas as ações administrativas.
+/// Nunca deletado. Usado para auditoria, compliance e troubleshooting.
+model AuditLog {
+  id           String      @id @default(uuid()) @db.Uuid
+  adminUserId  String      @map("admin_user_id") @db.Uuid
+  action       AuditAction
+  entityType   String      @map("entity_type") @db.VarChar(100) // "Vehicle", "PricingTable", etc.
+  entityId     String?     @map("entity_id") @db.Uuid
+  entityLabel  String?     @map("entity_label") @db.VarChar(255) // nome legível (ex: "Toyota Corolla 2024")
+  /// JSONB: { before: {...}, after: {...} } para UPDATE
+  /// JSONB: { data: {...} } para CREATE/DELETE
+  changes      Json?
+  ipAddress    String?     @map("ip_address") @db.VarChar(45)  // suporta IPv6
+  userAgent    String?     @map("user_agent") @db.Text
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  // Relacionamentos
+  adminUser AdminUser @relation(fields: [adminUserId], references: [id])
+
+  @@index([adminUserId, createdAt(sort: Desc)])
+  @@index([entityType, entityId])
+  @@index([action, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@map("audit_logs")
+}
