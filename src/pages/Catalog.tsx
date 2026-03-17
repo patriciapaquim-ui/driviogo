@@ -3,27 +3,32 @@ import { motion } from "framer-motion";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import VehicleCard from "@/components/VehicleCard";
-import { vehicles, brands, bodyTypes } from "@/data/vehicles";
 import { Search, SlidersHorizontal } from "lucide-react";
+import { usePublicVehicleList } from "@/hooks/usePublicVehicles";
 
 const Catalog = () => {
+  const { data: allVehicles = [], isLoading } = usePublicVehicleList();
+
   const [search, setSearch] = useState("");
   const [brand, setBrand] = useState("");
   const [bodyType, setBodyType] = useState("");
   const [maxPrice, setMaxPrice] = useState(10000);
   const [showFilters, setShowFilters] = useState(false);
 
+  const brands = useMemo(() => [...new Set(allVehicles.map((v) => v.brand))], [allVehicles]);
+  const bodyTypes = useMemo(() => [...new Set(allVehicles.map((v) => v.bodyType))], [allVehicles]);
+
   const filtered = useMemo(() => {
-    return vehicles.filter((v) => {
+    return allVehicles.filter((v) => {
       const matchSearch =
         !search ||
         `${v.brand} ${v.model}`.toLowerCase().includes(search.toLowerCase());
       const matchBrand = !brand || v.brand === brand;
       const matchBody = !bodyType || v.bodyType === bodyType;
-      const matchPrice = v.basePrice <= maxPrice;
+      const matchPrice = !v.basePrice || v.basePrice <= maxPrice;
       return matchSearch && matchBrand && matchBody && matchPrice;
     });
-  }, [search, brand, bodyType, maxPrice]);
+  }, [allVehicles, search, brand, bodyType, maxPrice]);
 
   const selectClass =
     "rounded-lg border border-border bg-card px-4 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary";
@@ -113,7 +118,13 @@ const Catalog = () => {
         </div>
 
         {/* Results */}
-        {filtered.length > 0 ? (
+        {isLoading ? (
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <div key={i} className="h-80 animate-pulse rounded-xl bg-muted" />
+            ))}
+          </div>
+        ) : filtered.length > 0 ? (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {filtered.map((v, i) => (
               <VehicleCard key={v.id} vehicle={v} index={i} />

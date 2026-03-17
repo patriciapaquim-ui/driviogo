@@ -7,7 +7,8 @@ import { Progress } from "@/components/ui/progress";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { vehicles } from "@/data/vehicles";
+import { usePublicVehicle } from "@/hooks/usePublicVehicles";
+import { useVehiclePricing } from "@/hooks/usePublicPricing";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import StepReview from "@/components/checkout/StepReview";
@@ -16,13 +17,14 @@ import StepContract from "@/components/checkout/StepContract";
 import StepPayment from "@/components/checkout/StepPayment";
 import StepConfirmation from "@/components/checkout/StepConfirmation";
 
-const periods = [
+// Fallback pricing when admin pricing table is not available
+const FALLBACK_PERIODS = [
   { months: 12, label: "12 meses", factor: 1.15 },
   { months: 24, label: "24 meses", factor: 1.0 },
   { months: 36, label: "36 meses", factor: 0.9 },
 ];
 
-const mileages = [
+const FALLBACK_MILEAGES = [
   { km: 1000, label: "1.000 km/mês", factor: 0 },
   { km: 2000, label: "2.000 km/mês", factor: 350 },
   { km: 3000, label: "3.000 km/mês", factor: 650 },
@@ -43,13 +45,33 @@ const Checkout = () => {
   const { toast } = useToast();
 
   const vehicleId = params.get("vehicle");
-  const periodIdx = Number(params.get("period") ?? 1);
+  const periodIdx = Number(params.get("period") ?? 0);
   const mileageIdx = Number(params.get("mileage") ?? 0);
 
-  const vehicle = vehicles.find((v) => v.id === vehicleId);
-  const period = periods[periodIdx] ?? periods[1];
-  const mileage = mileages[mileageIdx] ?? mileages[0];
-  const price = vehicle ? Math.round(vehicle.basePrice * period.factor + mileage.factor) : 0;
+  // Fetch vehicle and pricing from Supabase (with static fallback)
+  const { data: vehicle, isLoading: vehicleLoading } = usePublicVehicle(vehicleId ?? undefined);
+  const { data: pricingPeriods = [] } = useVehiclePricing(vehicle?.id);
+
+  const hasRealPricing = pricingPeriods.length > 0;
+
+  // Resolve period, mileage, and price from real or fallback pricing
+  let period: { months: number; label: string };
+  let mileage: { km: number; label: string };
+  let price: number;
+
+  if (hasRealPricing) {
+    const selectedPeriod = pricingPeriods[periodIdx] ?? pricingPeriods[0];
+    const selectedKm = selectedPeriod?.kmOptions[mileageIdx] ?? selectedPeriod?.kmOptions[0];
+    period = { months: selectedPeriod?.months ?? 24, label: selectedPeriod?.label ?? "24 meses" };
+    mileage = { km: selectedKm?.monthlyKm ?? 1000, label: selectedKm?.label ?? "1.000 km/mês" };
+    price = selectedKm?.price ?? 0;
+  } else {
+    const fallbackPeriod = FALLBACK_PERIODS[periodIdx] ?? FALLBACK_PERIODS[1];
+    const fallbackMileage = FALLBACK_MILEAGES[mileageIdx] ?? FALLBACK_MILEAGES[0];
+    period = { months: fallbackPeriod.months, label: fallbackPeriod.label };
+    mileage = { km: fallbackMileage.km, label: fallbackMileage.label };
+    price = vehicle ? Math.round(vehicle.basePrice * fallbackPeriod.factor + fallbackMileage.factor) : 0;
+  }
 
   const [step, setStep] = useState(0);
   const [profileForm, setProfileForm] = useState<ProfileForm>({
@@ -96,6 +118,18 @@ const Checkout = () => {
       });
     }
   }, [user]);
+
+  if (vehicleLoading) {
+    return (
+      <div className="flex min-h-screen flex-col bg-background">
+        <Header />
+        <div className="flex flex-1 items-center justify-center">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        </div>
+        <Footer />
+      </div>
+    );
+  }
 
   if (!vehicle) {
     return (
@@ -209,7 +243,6 @@ const Checkout = () => {
 
   const prev = () => {
     if (step === 0) {
-      // Go back to vehicle detail to edit selections
       navigate(`/veiculo/${vehicle.id}`);
     } else {
       setStep((s) => Math.max(s - 1, 0));

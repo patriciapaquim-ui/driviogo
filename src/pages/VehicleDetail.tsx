@@ -4,11 +4,32 @@ import { ArrowLeft, Check, Fuel, Settings, Gauge, Box, Users } from "lucide-reac
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import SubscriptionSimulator from "@/components/SubscriptionSimulator";
-import { vehicles } from "@/data/vehicles";
+import { usePublicVehicle } from "@/hooks/usePublicVehicles";
+import { useVehiclePricing } from "@/hooks/usePublicPricing";
 
 const VehicleDetail = () => {
   const { id } = useParams();
-  const vehicle = vehicles.find((v) => v.id === id);
+  const { data: vehicle, isLoading } = usePublicVehicle(id);
+  const { data: pricingPeriods = [] } = useVehiclePricing(vehicle?.id);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <main className="container mx-auto px-6 pb-16 pt-28">
+          <div className="grid gap-10 lg:grid-cols-[1fr_400px]">
+            <div className="space-y-6">
+              <div className="aspect-[16/10] w-full animate-pulse rounded-xl bg-muted" />
+              <div className="h-8 w-48 animate-pulse rounded bg-muted" />
+              <div className="h-4 w-full animate-pulse rounded bg-muted" />
+            </div>
+            <div className="h-96 animate-pulse rounded-xl bg-muted" />
+          </div>
+        </main>
+        <Footer />
+      </div>
+    );
+  }
 
   if (!vehicle) {
     return (
@@ -28,14 +49,14 @@ const VehicleDetail = () => {
   }
 
   const specItems = [
-    { icon: Settings, label: "Motor", value: vehicle.specs.engine },
-    { icon: Gauge, label: "Potência", value: vehicle.specs.power },
-    { icon: Settings, label: "Câmbio", value: vehicle.specs.transmission },
-    { icon: Fuel, label: "Combustível", value: vehicle.specs.fuel },
-    { icon: Fuel, label: "Consumo", value: vehicle.specs.consumption },
-    { icon: Box, label: "Porta-malas", value: vehicle.specs.trunk },
-    { icon: Users, label: "Lugares", value: `${vehicle.specs.seats}` },
-  ];
+    vehicle.specs.engine && { icon: Settings, label: "Motor", value: vehicle.specs.engine },
+    vehicle.specs.power && { icon: Gauge, label: "Potência", value: vehicle.specs.power },
+    vehicle.specs.transmission && { icon: Settings, label: "Câmbio", value: vehicle.specs.transmission },
+    vehicle.specs.fuel && { icon: Fuel, label: "Combustível", value: vehicle.specs.fuel },
+    vehicle.specs.consumption && { icon: Fuel, label: "Consumo", value: vehicle.specs.consumption },
+    vehicle.specs.trunk && { icon: Box, label: "Porta-malas", value: vehicle.specs.trunk },
+    vehicle.specs.seats && { icon: Users, label: "Lugares", value: `${vehicle.specs.seats}` },
+  ].filter(Boolean) as { icon: React.ElementType; label: string; value: string }[];
 
   return (
     <div className="min-h-screen bg-background">
@@ -79,54 +100,60 @@ const VehicleDetail = () => {
                   Indisponível no momento
                 </span>
               )}
-              <p className="mt-4 text-muted-foreground">{vehicle.description}</p>
+              {vehicle.description && (
+                <p className="mt-4 text-muted-foreground">{vehicle.description}</p>
+              )}
             </motion.div>
 
             {/* Specs */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
-              className="mt-10"
-            >
-              <h2 className="mb-4 font-display text-xl font-bold text-foreground">
-                Ficha Técnica
-              </h2>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {specItems.map(({ icon: Icon, label, value }) => (
-                  <div
-                    key={label}
-                    className="flex items-center gap-3 rounded-lg border border-border bg-card p-4"
-                  >
-                    <Icon className="h-5 w-5 shrink-0 text-primary" />
-                    <div>
-                      <p className="text-xs text-muted-foreground">{label}</p>
-                      <p className="text-sm font-medium text-foreground">{value}</p>
+            {specItems.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                className="mt-10"
+              >
+                <h2 className="mb-4 font-display text-xl font-bold text-foreground">
+                  Ficha Técnica
+                </h2>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {specItems.map(({ icon: Icon, label, value }) => (
+                    <div
+                      key={label}
+                      className="flex items-center gap-3 rounded-lg border border-border bg-card p-4"
+                    >
+                      <Icon className="h-5 w-5 shrink-0 text-primary" />
+                      <div>
+                        <p className="text-xs text-muted-foreground">{label}</p>
+                        <p className="text-sm font-medium text-foreground">{value}</p>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </motion.div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
 
             {/* Features */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-              className="mt-10"
-            >
-              <h2 className="mb-4 font-display text-xl font-bold text-foreground">
-                Itens de Série
-              </h2>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {vehicle.features.map((f) => (
-                  <div key={f} className="flex items-center gap-2 text-sm text-foreground">
-                    <Check className="h-4 w-4 shrink-0 text-primary" />
-                    {f}
-                  </div>
-                ))}
-              </div>
-            </motion.div>
+            {vehicle.features.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 }}
+                className="mt-10"
+              >
+                <h2 className="mb-4 font-display text-xl font-bold text-foreground">
+                  Itens de Série
+                </h2>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {vehicle.features.map((f) => (
+                    <div key={f} className="flex items-center gap-2 text-sm text-foreground">
+                      <Check className="h-4 w-4 shrink-0 text-primary" />
+                      {f}
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
 
             {/* Optionals */}
             {vehicle.optionals.length > 0 && (
@@ -151,7 +178,7 @@ const VehicleDetail = () => {
 
           {/* Right: Simulator */}
           <div className="lg:sticky lg:top-28 lg:self-start">
-            <SubscriptionSimulator vehicle={vehicle} />
+            <SubscriptionSimulator vehicle={vehicle} pricingPeriods={pricingPeriods} />
           </div>
         </div>
       </main>
