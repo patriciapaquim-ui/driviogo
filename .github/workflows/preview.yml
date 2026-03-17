@@ -1,19 +1,30 @@
-name: Preview — Deploy PR to Vercel
+name: Preview — Deploy PR para Hostinger (Staging)
 
 on:
   pull_request:
     branches: ["main"]
     types: [opened, synchronize, reopened]
 
+# ─────────────────────────────────────────────────────────────────
+# Pré-requisito: crie um subdomínio de staging na Hostinger
+# Exemplo: staging.seudominio.com.br → pasta /staging no hPanel
+#
+# Secrets necessários (Settings → Secrets → Actions):
+#   FTP_SERVER             ex: ftp.seudominio.com.br
+#   FTP_USERNAME           usuário FTP da Hostinger
+#   FTP_PASSWORD           senha FTP da Hostinger
+#   FTP_STAGING_PATH       caminho remoto  ex: /staging/
+#   VITE_SUPABASE_URL
+#   VITE_SUPABASE_PUBLISHABLE_KEY
+# ─────────────────────────────────────────────────────────────────
+
 jobs:
-  deploy-preview:
-    name: Deploy Preview
+  deploy-staging:
+    name: Build + Deploy Staging
     runs-on: ubuntu-latest
-    # Garante que CI passou antes de fazer deploy
-    needs: []
 
     permissions:
-      pull-requests: write   # Para comentar o link do preview no PR
+      pull-requests: write
 
     steps:
       - name: Checkout
@@ -28,36 +39,37 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Vercel CLI
-        run: npm install --global vercel@latest
+      - name: Build
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
 
-      - name: Pull Vercel environment (preview)
-        run: vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Upload para Hostinger (Staging) via FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: ./dist/
+          server-dir: ${{ secrets.FTP_STAGING_PATH }}
+          # Deleta arquivos remotos que não existem mais no build
+          dangerous-clean-slate: false
 
-      - name: Build (preview)
-        run: vercel build --token=${{ secrets.VERCEL_TOKEN }}
-
-      - name: Deploy to Vercel (preview)
-        id: deploy
-        run: |
-          URL=$(vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }})
-          echo "preview_url=$URL" >> $GITHUB_OUTPUT
-
-      - name: Comment preview URL on PR
+      - name: Comentar URL de staging no PR
         uses: actions/github-script@v7
         with:
           script: |
-            const url = "${{ steps.deploy.outputs.preview_url }}";
+            const stagingUrl = "https://staging.${{ secrets.FTP_SERVER_DOMAIN }}";
             const body = [
-              "## 🔍 Preview disponível",
+              "## Ambiente de Teste disponível",
               "",
-              `**URL:** ${url}`,
+              `**URL:** ${stagingUrl}`,
               "",
-              "Este preview reflete o último commit deste PR.",
+              "Este ambiente reflete o último commit deste PR.",
               "Revise as mudanças e aprove o PR para fazer deploy em produção.",
             ].join("\n");
 
-            // Atualiza comentário existente ou cria um novo
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -66,7 +78,7 @@ jobs:
 
             const existing = comments.find(c =>
               c.user.login === "github-actions[bot]" &&
-              c.body.includes("Preview disponível")
+              c.body.includes("Ambiente de Teste disponível")
             );
 
             if (existing) {
