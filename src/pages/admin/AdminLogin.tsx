@@ -40,6 +40,15 @@ export default function AdminLogin() {
     }
   }, [isAdmin, loading, navigate, from]);
 
+  // Show spinner while session check is in progress
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
   const onSubmit = async (data: LoginForm) => {
     setServerError('');
     const { error } = await signIn(data.email, data.password);
