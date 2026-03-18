@@ -1,7 +1,12 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { extractAdminRole } from '@/lib/admin/permissions';
 import type { AdminRole } from '@/types/admin';
+
+interface AdminUserRow {
+  role: AdminRole;
+  name: string;
+  is_active: boolean;
+}
 
 interface AdminAuthContextType {
   isAdmin: boolean;
@@ -15,6 +20,10 @@ interface AdminAuthContextType {
 
 const AdminAuthContext = createContext<AdminAuthContextType | undefined>(undefined);
 
+// admin_users is not in the auto-generated types yet; cast to bypass
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const db = supabase as any;
+
 export const AdminAuthProvider = ({ children }: { children: ReactNode }) => {
   const [isAdmin, setIsAdmin] = useState(false);
   const [role, setRole] = useState<AdminRole | null>(null);
@@ -24,6 +33,7 @@ export const AdminAuthProvider = ({ children }: { children: ReactNode }) => {
 
   const checkAdminSession = async () => {
     const { data: { session } } = await supabase.auth.getSession();
+
     if (!session) {
       setIsAdmin(false);
       setRole(null);
@@ -31,20 +41,27 @@ export const AdminAuthProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
-    const appMetadata = session.user.app_metadata as Record<string, unknown>;
-    const adminRole = extractAdminRole(appMetadata);
+    // Query admin_users directly — no app_metadata dependency
+    const { data: row } = await db
+      .from('admin_users')
+      .select('role, name, is_active')
+      .eq('id', session.user.id)
+      .maybeSingle();
 
-    // DEV fallback: treat any authenticated user as ADMIN when no role is set
-    // Remove this in production after configuring app_metadata on Supabase
-    const effectiveRole = adminRole ?? (import.meta.env.DEV ? 'ADMIN' : null);
+    const adminUser = row as AdminUserRow | null;
 
-    setRole(effectiveRole);
-    setIsAdmin(effectiveRole !== null);
-    setAdminName(
-      (session.user.user_metadata?.full_name as string) ||
-      session.user.email?.split('@')[0] ||
-      'Admin'
-    );
+    if (!adminUser || !adminUser.is_active) {
+      setIsAdmin(false);
+      setRole(null);
+      setAdminName('');
+      setAdminEmail('');
+      setLoading(false);
+      return;
+    }
+
+    setRole(adminUser.role);
+    setIsAdmin(true);
+    setAdminName(adminUser.name || session.user.email?.split('@')[0] || 'Admin');
     setAdminEmail(session.user.email ?? '');
     setLoading(false);
   };
@@ -65,6 +82,16 @@ export const AdminAuthProvider = ({ children }: { children: ReactNode }) => {
       }
       return { error: 'Não foi possível fazer login. Tente novamente.' };
     }
+
+    // Update last_login_at (fire and forget)
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      db.from('admin_users')
+        .update({ last_login_at: new Date().toISOString() })
+        .eq('id', session.user.id)
+        .then(() => {});
+    }
+
     return { error: null };
   };
 
@@ -72,6 +99,8 @@ export const AdminAuthProvider = ({ children }: { children: ReactNode }) => {
     await supabase.auth.signOut();
     setIsAdmin(false);
     setRole(null);
+    setAdminName('');
+    setAdminEmail('');
   };
 
   return (
