@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -18,7 +18,7 @@ const loginSchema = z.object({
 type LoginForm = z.infer<typeof loginSchema>;
 
 export default function AdminLogin() {
-  const { signIn, isAdmin } = useAdminAuth();
+  const { signIn, isAdmin, loading } = useAdminAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [showPassword, setShowPassword] = useState(false);
@@ -26,17 +26,19 @@ export default function AdminLogin() {
 
   const from = (location.state as { from?: Location })?.from?.pathname ?? '/admin/dashboard';
 
-  // If already logged in, redirect immediately
-  if (isAdmin) {
-    navigate(from, { replace: true });
-    return null;
-  }
-
+  // All hooks must be called before any conditional return
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<LoginForm>({ resolver: zodResolver(loginSchema) });
+
+  // Redirect after auth check completes — never during render
+  useEffect(() => {
+    if (!loading && isAdmin) {
+      navigate(from, { replace: true });
+    }
+  }, [isAdmin, loading, navigate, from]);
 
   const onSubmit = async (data: LoginForm) => {
     setServerError('');
