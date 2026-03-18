@@ -1,5 +1,5 @@
 // =============================================================================
-// DrivioGo — useVehicles hook (React Query)
+// DrivioGo — useVehicles hook (React Query + Vigência)
 // =============================================================================
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -19,43 +19,66 @@ export function useVehicles(filters: VehicleFilters = {}) {
     staleTime: 30_000,
   });
 
-  const invalidate = () =>
+  const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['admin', 'vehicles'] });
+    qc.invalidateQueries({ queryKey: ['public', 'vehicles'] });
+  };
 
   const createMutation = useMutation({
-    mutationFn: vehicleService.createVehicle,
-    onSuccess: () => {
+    mutationFn: ({ data, effectiveFrom }: { data: VehicleFormData; effectiveFrom: Date | null }) =>
+      vehicleService.createVehicle(data, effectiveFrom),
+    onSuccess: (_v, { effectiveFrom }) => {
       invalidate();
-      toast.success('Veículo cadastrado com sucesso!');
+      toast.success(
+        effectiveFrom && effectiveFrom > new Date()
+          ? `Veículo agendado para ${effectiveFrom.toLocaleDateString('pt-BR')}.`
+          : 'Veículo cadastrado com sucesso!',
+      );
     },
     onError: (e: Error) => toast.error(`Erro ao cadastrar: ${e.message}`),
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<VehicleFormData> }) =>
-      vehicleService.updateVehicle(id, data),
-    onSuccess: () => {
+    mutationFn: ({
+      id, data, effectiveFrom, adminUserId,
+    }: { id: string; data: Partial<VehicleFormData>; effectiveFrom: Date | null; adminUserId?: string }) =>
+      vehicleService.updateVehicle(id, data, effectiveFrom, adminUserId),
+    onSuccess: (_v, { effectiveFrom }) => {
       invalidate();
-      toast.success('Veículo atualizado com sucesso!');
+      toast.success(
+        effectiveFrom && effectiveFrom > new Date()
+          ? `Alteração agendada para ${effectiveFrom.toLocaleDateString('pt-BR')}.`
+          : 'Veículo atualizado com sucesso!',
+      );
     },
     onError: (e: Error) => toast.error(`Erro ao atualizar: ${e.message}`),
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: vehicleService.deleteVehicle,
-    onSuccess: () => {
+  const deactivateMutation = useMutation({
+    mutationFn: ({ id, effectiveUntil, adminUserId }: { id: string; effectiveUntil: Date | null; adminUserId?: string }) =>
+      vehicleService.deactivateVehicle(id, effectiveUntil, adminUserId),
+    onSuccess: (_v, { effectiveUntil }) => {
       invalidate();
-      toast.success('Veículo excluído com sucesso!');
+      toast.success(
+        effectiveUntil && effectiveUntil > new Date()
+          ? `Desativação agendada para ${effectiveUntil.toLocaleDateString('pt-BR')}.`
+          : 'Veículo desativado.',
+      );
     },
-    onError: (e: Error) => toast.error(`Erro ao excluir: ${e.message}`),
+    onError: (e: Error) => toast.error(`Erro ao desativar: ${e.message}`),
   });
 
   const toggleMutation = useMutation({
-    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) =>
-      vehicleService.toggleVehicleActive(id, isActive),
-    onSuccess: (_data, { isActive }) => {
+    mutationFn: ({ id, isActive, effectiveFrom }: { id: string; isActive: boolean; effectiveFrom: Date | null }) =>
+      vehicleService.toggleVehicleActive(id, isActive, effectiveFrom),
+    onSuccess: (_data, { isActive, effectiveFrom }) => {
       invalidate();
-      toast.success(isActive ? 'Veículo ativado!' : 'Veículo desativado!');
+      const scheduled = effectiveFrom && effectiveFrom > new Date();
+      if (scheduled) {
+        toast.success(`Alteração agendada para ${effectiveFrom!.toLocaleDateString('pt-BR')}.`);
+      } else {
+        toast.success(isActive ? 'Veículo ativado!' : 'Veículo desativado!');
+      }
     },
     onError: (e: Error) => toast.error(`Erro: ${e.message}`),
   });
@@ -68,16 +91,18 @@ export function useVehicles(filters: VehicleFilters = {}) {
     loading:    query.isLoading,
     error:      query.error,
 
-    createVehicle: (data: VehicleFormData) => createMutation.mutateAsync(data),
-    updateVehicle: (id: string, data: Partial<VehicleFormData>) =>
-      updateMutation.mutateAsync({ id, data }),
-    deleteVehicle: (id: string) => deleteMutation.mutateAsync(id),
-    toggleActive:  (id: string, isActive: boolean) =>
-      toggleMutation.mutateAsync({ id, isActive }),
+    createVehicle: (data: VehicleFormData, effectiveFrom: Date | null) =>
+      createMutation.mutateAsync({ data, effectiveFrom }),
+    updateVehicle: (id: string, data: Partial<VehicleFormData>, effectiveFrom: Date | null, adminUserId?: string) =>
+      updateMutation.mutateAsync({ id, data, effectiveFrom, adminUserId }),
+    deactivateVehicle: (id: string, effectiveUntil: Date | null, adminUserId?: string) =>
+      deactivateMutation.mutateAsync({ id, effectiveUntil, adminUserId }),
+    toggleActive: (id: string, isActive: boolean, effectiveFrom: Date | null) =>
+      toggleMutation.mutateAsync({ id, isActive, effectiveFrom }),
 
-    isCreating: createMutation.isPending,
-    isUpdating: updateMutation.isPending,
-    isDeleting: deleteMutation.isPending,
+    isCreating:     createMutation.isPending,
+    isUpdating:     updateMutation.isPending,
+    isDeactivating: deactivateMutation.isPending,
   };
 }
 

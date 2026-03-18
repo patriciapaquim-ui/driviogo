@@ -27,6 +27,7 @@ import AdminPricing from "./pages/admin/AdminPricing";
 import AdminImport from "./pages/admin/AdminImport";
 import AdminImportHistory from "./pages/admin/AdminImportHistory";
 import AdminLogs from "./pages/admin/AdminLogs";
+import AdminDiscounts from "./pages/admin/AdminDiscounts";
 
 const queryClient = new QueryClient();
 
@@ -84,6 +85,10 @@ const App = () => (
               <Route
                 path="/admin/logs"
                 element={<AdminGuard><AdminLogs /></AdminGuard>}
+              />
+              <Route
+                path="/admin/descontos"
+                element={<AdminGuard requiredRole="ADMIN"><AdminDiscounts /></AdminGuard>}
               />
 
               {/* ── 404 ───────────────────────────────────────── */}

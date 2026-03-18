@@ -1,6 +1,5 @@
 // =============================================================================
-// DrivioGo — Pricing Service
-// Reads pricing tables, versions, and rules from Supabase.
+// DrivioGo — Pricing Service (with Vigência support)
 // =============================================================================
 
 import { supabase } from '@/integrations/supabase/client';
@@ -41,6 +40,9 @@ function mapRule(r: Record<string, unknown>): VehiclePricingRule {
 }
 
 function mapVersion(r: Record<string, unknown>): PricingTableVersion {
+  const effectiveFrom = r.effective_from as string | null | undefined;
+  const isScheduled = !!(effectiveFrom && new Date(effectiveFrom) > new Date());
+
   return {
     id:              r.id               as string,
     pricingTableId:  r.pricing_table_id as string,
@@ -50,11 +52,13 @@ function mapVersion(r: Record<string, unknown>): PricingTableVersion {
     isActive:        r.is_active        as boolean,
     activatedAt:     r.activated_at     as string | undefined,
     deactivatedAt:   r.deactivated_at   as string | undefined,
+    effectiveFrom:   effectiveFrom ?? null,
+    isScheduled,
     createdAt:       r.created_at       as string,
     createdById:     r.created_by       as string,
     createdByName:   (r.admin_user as Record<string, unknown>)?.name as string | undefined,
     importJobId:     r.import_job_id    as string | undefined,
-    rules: [],  // loaded separately when needed
+    rules: [],
   };
 }
 
@@ -74,7 +78,8 @@ function mapTable(r: Record<string, unknown>): PricingTable {
 // Read
 // ---------------------------------------------------------------------------
 
-/** Returns the currently active pricing table with its versions (no rules). */
+/** Returns the currently active pricing table with its versions (no rules).
+ *  "Active version" = is_active=TRUE AND (effective_from IS NULL OR effective_from <= NOW()). */
 export async function getActivePricingTable(): Promise<PricingTable | null> {
   const { data, error } = await db
     .from('pricing_tables')
@@ -82,7 +87,8 @@ export async function getActivePricingTable(): Promise<PricingTable | null> {
       *,
       pricing_table_versions(
         id, pricing_table_id, version_number, label, notes,
-        is_active, activated_at, deactivated_at, created_at, created_by, import_job_id,
+        is_active, activated_at, deactivated_at, effective_from,
+        created_at, created_by, import_job_id,
         admin_user:admin_users(name)
       )
     `)
@@ -118,7 +124,7 @@ export async function getVersionRules(versionId: string): Promise<VehiclePricing
 export async function listPricingTables(): Promise<PricingTable[]> {
   const { data, error } = await db
     .from('pricing_tables')
-    .select('*, pricing_table_versions(id, version_number, is_active, label, created_at)')
+    .select('*, pricing_table_versions(id, version_number, is_active, label, created_at, effective_from)')
     .order('created_at', { ascending: false });
 
   if (error) throw new Error(error.message);
@@ -126,12 +132,57 @@ export async function listPricingTables(): Promise<PricingTable[]> {
 }
 
 // ---------------------------------------------------------------------------
-// Activate version (calls DB function for atomic swap)
+// Activate version (calls DB function — now accepts effectiveFrom)
 // ---------------------------------------------------------------------------
 
-export async function activateVersion(versionId: string): Promise<void> {
+export async function activateVersion(
+  versionId: string,
+  effectiveFrom: Date | null = null,
+): Promise<void> {
   const { error } = await supabase.rpc('activate_pricing_version' as any, {
-    p_version_id: versionId,
+    p_version_id:    versionId,
+    p_effective_from: effectiveFrom ? effectiveFrom.toISOString() : null,
   });
   if (error) throw new Error(error.message);
+}
+
+// ---------------------------------------------------------------------------
+// Clone current active version with selective price overrides + vigência
+// Calls the DB function clone_pricing_version_with_overrides.
+// ---------------------------------------------------------------------------
+
+export interface PriceOverride {
+  kmOptionId:   string;
+  monthlyPrice: number;
+}
+
+export async function cloneVersionWithOverrides(params: {
+  sourceVersionId: string;
+  label:           string;
+  notes?:          string;
+  effectiveFrom:   Date | null;   // null = immediate
+  createdBy:       string;
+  overrides:       PriceOverride[];
+}): Promise<string> {
+  const { sourceVersionId, label, notes, effectiveFrom, createdBy, overrides } = params;
+
+  const overridesJson = overrides.map((o) => ({
+    km_option_id:  o.kmOptionId,
+    monthly_price: o.monthlyPrice,
+  }));
+
+  const { data, error } = await supabase.rpc(
+    'clone_pricing_version_with_overrides' as any,
+    {
+      p_source_version_id: sourceVersionId,
+      p_label:             label,
+      p_notes:             notes ?? null,
+      p_effective_from:    (effectiveFrom ?? new Date()).toISOString(),
+      p_created_by:        createdBy,
+      p_overrides:         JSON.stringify(overridesJson),
+    },
+  );
+
+  if (error) throw new Error(error.message);
+  return data as string;
 }

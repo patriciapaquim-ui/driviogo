@@ -1,6 +1,7 @@
 // =============================================================================
-// DrivioGo — Vehicle Service
+// DrivioGo — Vehicle Service (with Vigência support)
 // All CRUD operations for the vehicles table via Supabase.
+// Changes are never overwritten: previous state is saved to vehicle_change_history.
 // Uses `as any` casts because the auto-generated types.ts predates the
 // admin migration — update it after running supabase db push.
 // =============================================================================
@@ -8,7 +9,7 @@
 import { supabase } from '@/integrations/supabase/client';
 import type { Vehicle, VehicleFormData, VehicleCategory } from '@/types/admin';
 
-const db = supabase as any; // Remove when types.ts is regenerated
+const db = supabase as any;
 
 // ---------------------------------------------------------------------------
 // Mappers
@@ -46,6 +47,8 @@ function mapVehicle(r: Record<string, unknown>): Vehicle {
     images: ((r.vehicle_images as Record<string, unknown>[]) ?? [])
               .map(mapImage)
               .sort((a, b) => a.displayOrder - b.displayOrder),
+    effectiveFrom:  r.effective_from  as string,
+    effectiveUntil: (r.effective_until as string | null) ?? null,
     createdAt:    r.created_at    as string,
     updatedAt:    r.updated_at    as string,
   };
@@ -119,27 +122,63 @@ export async function getVehicleById(id: string): Promise<Vehicle | null> {
 }
 
 // ---------------------------------------------------------------------------
-// Write
+// Write helpers
 // ---------------------------------------------------------------------------
 
-export async function createVehicle(form: VehicleFormData): Promise<Vehicle> {
+/** Saves the current vehicle state to vehicle_change_history before any update. */
+async function logVehicleHistory(
+  vehicleId: string,
+  previousData: Record<string, unknown>,
+  newData: Record<string, unknown>,
+  effectiveFrom: Date | null,
+  adminUserId?: string,
+): Promise<void> {
+  const changedFields = Object.keys(newData).filter(
+    (k) => JSON.stringify(previousData[k]) !== JSON.stringify(newData[k]),
+  );
+
+  if (changedFields.length === 0) return;
+
+  const { error } = await db.from('vehicle_change_history').insert({
+    vehicle_id:      vehicleId,
+    changed_fields:  changedFields,
+    previous_values: previousData,
+    new_values:      newData,
+    effective_from:  (effectiveFrom ?? new Date()).toISOString(),
+    changed_by:      adminUserId ?? null,
+  });
+
+  if (error) console.warn('vehicle_change_history write failed:', error.message);
+}
+
+// ---------------------------------------------------------------------------
+// Create
+// ---------------------------------------------------------------------------
+
+export async function createVehicle(
+  form: VehicleFormData,
+  effectiveFrom: Date | null = null,
+): Promise<Vehicle> {
+  const effectiveAt = (effectiveFrom ?? new Date()).toISOString();
+
   const { data, error } = await db
     .from('vehicles')
     .insert({
-      brand:        form.brand,
-      model:        form.model,
-      year:         form.year,
-      version:      form.version   || null,
-      category:     form.category,
-      transmission: form.transmission,
-      fuel:         form.fuel,
-      color:        form.color     || null,
-      seats:        form.seats,
-      doors:        form.doors,
-      description:  form.description || null,
-      features:     form.features,
-      is_active:    form.isActive,
-      is_featured:  form.isFeatured,
+      brand:          form.brand,
+      model:          form.model,
+      year:           form.year,
+      version:        form.version   || null,
+      category:       form.category,
+      transmission:   form.transmission,
+      fuel:           form.fuel,
+      color:          form.color     || null,
+      seats:          form.seats,
+      doors:          form.doors,
+      description:    form.description || null,
+      features:       form.features,
+      is_active:      form.isActive,
+      is_featured:    form.isFeatured,
+      effective_from: effectiveAt,
     })
     .select('*, vehicle_images(*)')
     .single();
@@ -148,7 +187,19 @@ export async function createVehicle(form: VehicleFormData): Promise<Vehicle> {
   return mapVehicle(data);
 }
 
-export async function updateVehicle(id: string, form: Partial<VehicleFormData>): Promise<Vehicle> {
+// ---------------------------------------------------------------------------
+// Update (with history logging)
+// ---------------------------------------------------------------------------
+
+export async function updateVehicle(
+  id: string,
+  form: Partial<VehicleFormData>,
+  effectiveFrom: Date | null = null,
+  adminUserId?: string,
+): Promise<Vehicle> {
+  // Load current state for history
+  const current = await getVehicleById(id);
+
   const patch: Record<string, unknown> = {};
   if (form.brand        !== undefined) patch.brand        = form.brand;
   if (form.model        !== undefined) patch.model        = form.model;
@@ -165,6 +216,11 @@ export async function updateVehicle(id: string, form: Partial<VehicleFormData>):
   if (form.isActive     !== undefined) patch.is_active    = form.isActive;
   if (form.isFeatured   !== undefined) patch.is_featured  = form.isFeatured;
 
+  // Set effective_from when scheduling future changes
+  if (effectiveFrom) {
+    patch.effective_from = effectiveFrom.toISOString();
+  }
+
   const { data, error } = await db
     .from('vehicles')
     .update(patch)
@@ -173,19 +229,80 @@ export async function updateVehicle(id: string, form: Partial<VehicleFormData>):
     .single();
 
   if (error) throw new Error(error.message);
+
+  // Log history asynchronously (non-blocking)
+  if (current) {
+    logVehicleHistory(
+      id,
+      {
+        brand: current.brand, model: current.model, year: current.year,
+        version: current.version, category: current.category,
+        transmission: current.transmission, fuel: current.fuel,
+        color: current.color, seats: current.seats, doors: current.doors,
+        description: current.description, features: current.features,
+        is_active: current.isActive, is_featured: current.isFeatured,
+        effective_from: current.effectiveFrom,
+      },
+      patch,
+      effectiveFrom,
+      adminUserId,
+    );
+  }
+
   return mapVehicle(data);
 }
 
-export async function deleteVehicle(id: string): Promise<void> {
-  const { error } = await db.from('vehicles').delete().eq('id', id);
-  if (error) throw new Error(error.message);
-}
+// ---------------------------------------------------------------------------
+// Deactivate (soft delete — sets effective_until, never hard deletes)
+// ---------------------------------------------------------------------------
 
-export async function toggleVehicleActive(id: string, isActive: boolean): Promise<void> {
+export async function deactivateVehicle(
+  id: string,
+  effectiveUntil: Date | null = null,
+  adminUserId?: string,
+): Promise<void> {
+  const until = (effectiveUntil ?? new Date()).toISOString();
+  const current = await getVehicleById(id);
+
   const { error } = await db
     .from('vehicles')
-    .update({ is_active: isActive })
+    .update({ effective_until: until, is_active: false })
     .eq('id', id);
+
+  if (error) throw new Error(error.message);
+
+  if (current) {
+    logVehicleHistory(
+      id,
+      { is_active: current.isActive, effective_until: current.effectiveUntil },
+      { is_active: false, effective_until: until },
+      effectiveUntil,
+      adminUserId,
+    );
+  }
+}
+
+export async function toggleVehicleActive(
+  id: string,
+  isActive: boolean,
+  effectiveFrom: Date | null = null,
+): Promise<void> {
+  const patch: Record<string, unknown> = { is_active: isActive };
+
+  if (isActive) {
+    // Reactivating: clear effective_until and optionally set new effective_from
+    patch.effective_until = null;
+    if (effectiveFrom) patch.effective_from = effectiveFrom.toISOString();
+  } else {
+    // Deactivating: set effective_until
+    patch.effective_until = (effectiveFrom ?? new Date()).toISOString();
+  }
+
+  const { error } = await db
+    .from('vehicles')
+    .update(patch)
+    .eq('id', id);
+
   if (error) throw new Error(error.message);
 }
 

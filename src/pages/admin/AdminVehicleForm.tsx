@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useForm, Controller } from 'react-hook-form';
 import { z } from 'zod';
@@ -15,6 +15,7 @@ import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AdminLayout } from '@/components/admin/layout/AdminLayout';
 import { AdminHeader } from '@/components/admin/layout/AdminHeader';
+import { VigenciaModal } from '@/components/admin/shared/VigenciaModal';
 import { useVehicles, useVehicle } from '@/hooks/admin/useVehicles';
 import {
   CATEGORY_LABELS,
@@ -24,32 +25,35 @@ import {
 import type { VehicleCategory, VehicleTransmission, VehicleFuel, VehicleFormData } from '@/types/admin';
 
 const vehicleSchema = z.object({
-  brand: z.string().min(1, 'Informe a marca.'),
-  model: z.string().min(1, 'Informe o modelo.'),
-  year: z.coerce.number().min(2010, 'Ano inválido.').max(2030, 'Ano inválido.'),
-  version: z.string(),
-  category: z.enum(['HATCH', 'SEDAN', 'SUV', 'PICKUP', 'MINIVAN', 'ESPORTIVO', 'ELETRICO'] as const),
+  brand:        z.string().min(1, 'Informe a marca.'),
+  model:        z.string().min(1, 'Informe o modelo.'),
+  year:         z.coerce.number().min(2010, 'Ano inválido.').max(2030, 'Ano inválido.'),
+  version:      z.string(),
+  category:     z.enum(['HATCH', 'SEDAN', 'SUV', 'PICKUP', 'MINIVAN', 'ESPORTIVO', 'ELETRICO'] as const),
   transmission: z.enum(['MANUAL', 'AUTOMATICO', 'CVT'] as const),
-  fuel: z.enum(['FLEX', 'GASOLINA', 'DIESEL', 'ELETRICO', 'HIBRIDO'] as const),
-  color: z.string(),
-  seats: z.coerce.number().min(1).max(9),
-  doors: z.coerce.number().min(2).max(5),
-  description: z.string(),
-  features: z.array(z.string()),
-  isActive: z.boolean(),
-  isFeatured: z.boolean(),
+  fuel:         z.enum(['FLEX', 'GASOLINA', 'DIESEL', 'ELETRICO', 'HIBRIDO'] as const),
+  color:        z.string(),
+  seats:        z.coerce.number().min(1).max(9),
+  doors:        z.coerce.number().min(2).max(5),
+  description:  z.string(),
+  features:     z.array(z.string()),
+  isActive:     z.boolean(),
+  isFeatured:   z.boolean(),
 });
 
-const CATEGORIES = Object.keys(CATEGORY_LABELS) as VehicleCategory[];
+const CATEGORIES    = Object.keys(CATEGORY_LABELS)    as VehicleCategory[];
 const TRANSMISSIONS = Object.keys(TRANSMISSION_LABELS) as VehicleTransmission[];
-const FUELS = Object.keys(FUEL_LABELS) as VehicleFuel[];
+const FUELS         = Object.keys(FUEL_LABELS)         as VehicleFuel[];
 
 export default function AdminVehicleForm() {
   const { id } = useParams<{ id: string }>();
   const isEditing = !!id;
-  const navigate = useNavigate();
+  const navigate  = useNavigate();
   const { createVehicle, updateVehicle, isCreating, isUpdating } = useVehicles();
   const { data: vehicle, isLoading: loadingVehicle } = useVehicle(id);
+
+  // Hold validated form data until vigência is confirmed
+  const [pendingFormData, setPendingFormData] = useState<VehicleFormData | null>(null);
 
   const {
     register,
@@ -60,20 +64,10 @@ export default function AdminVehicleForm() {
   } = useForm<VehicleFormData>({
     resolver: zodResolver(vehicleSchema),
     defaultValues: {
-      brand: '',
-      model: '',
-      year: new Date().getFullYear(),
-      version: '',
-      category: 'SUV',
-      transmission: 'AUTOMATICO',
-      fuel: 'FLEX',
-      color: '',
-      seats: 5,
-      doors: 4,
-      description: '',
-      features: [],
-      isActive: true,
-      isFeatured: false,
+      brand: '', model: '', year: new Date().getFullYear(),
+      version: '', category: 'SUV', transmission: 'AUTOMATICO', fuel: 'FLEX',
+      color: '', seats: 5, doors: 4, description: '', features: [],
+      isActive: true, isFeatured: false,
     },
   });
 
@@ -83,12 +77,20 @@ export default function AdminVehicleForm() {
 
   const isSubmitting = isCreating || isUpdating;
 
-  const onSubmit = async (data: VehicleFormData) => {
+  // Step 1: validate → open vigência modal
+  const onSubmit = (data: VehicleFormData) => {
+    setPendingFormData(data);
+  };
+
+  // Step 2: vigência confirmed → call service
+  const handleVigenciaConfirm = async (effectiveFrom: Date | null) => {
+    if (!pendingFormData) return;
     if (isEditing && id) {
-      await updateVehicle(id, data);
+      await updateVehicle(id, pendingFormData, effectiveFrom);
     } else {
-      await createVehicle(data);
+      await createVehicle(pendingFormData, effectiveFrom);
     }
+    setPendingFormData(null);
     navigate('/admin/veiculos');
   };
 
@@ -106,8 +108,7 @@ export default function AdminVehicleForm() {
       <main className="flex-1 overflow-auto p-6">
         <div className="max-w-3xl mx-auto">
           <Button
-            variant="ghost"
-            size="sm"
+            variant="ghost" size="sm"
             className="gap-1.5 text-slate-500 mb-5 -ml-2"
             onClick={() => navigate('/admin/veiculos')}
           >
@@ -126,9 +127,7 @@ export default function AdminVehicleForm() {
 
               {/* Identificação */}
               <Card className="border-0 shadow-sm">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Identificação</CardTitle>
-                </CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="text-base">Identificação</CardTitle></CardHeader>
                 <CardContent className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
@@ -162,67 +161,47 @@ export default function AdminVehicleForm() {
 
               {/* Especificações */}
               <Card className="border-0 shadow-sm">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Especificações</CardTitle>
-                </CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="text-base">Especificações</CardTitle></CardHeader>
                 <CardContent className="space-y-4">
                   <div className="grid grid-cols-3 gap-4">
                     <div className="space-y-1.5">
                       <Label>Categoria <span className="text-red-500">*</span></Label>
-                      <Controller
-                        control={control}
-                        name="category"
-                        render={({ field }) => (
-                          <Select value={field.value} onValueChange={field.onChange}>
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {CATEGORIES.map((c) => (
-                                <SelectItem key={c} value={c}>{CATEGORY_LABELS[c]}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        )}
-                      />
+                      <Controller control={control} name="category" render={({ field }) => (
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {CATEGORIES.map((c) => (
+                              <SelectItem key={c} value={c}>{CATEGORY_LABELS[c]}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )} />
                     </div>
                     <div className="space-y-1.5">
                       <Label>Câmbio <span className="text-red-500">*</span></Label>
-                      <Controller
-                        control={control}
-                        name="transmission"
-                        render={({ field }) => (
-                          <Select value={field.value} onValueChange={field.onChange}>
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {TRANSMISSIONS.map((t) => (
-                                <SelectItem key={t} value={t}>{TRANSMISSION_LABELS[t]}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        )}
-                      />
+                      <Controller control={control} name="transmission" render={({ field }) => (
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {TRANSMISSIONS.map((t) => (
+                              <SelectItem key={t} value={t}>{TRANSMISSION_LABELS[t]}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )} />
                     </div>
                     <div className="space-y-1.5">
                       <Label>Combustível <span className="text-red-500">*</span></Label>
-                      <Controller
-                        control={control}
-                        name="fuel"
-                        render={({ field }) => (
-                          <Select value={field.value} onValueChange={field.onChange}>
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {FUELS.map((f) => (
-                                <SelectItem key={f} value={f}>{FUEL_LABELS[f]}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        )}
-                      />
+                      <Controller control={control} name="fuel" render={({ field }) => (
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {FUELS.map((f) => (
+                              <SelectItem key={f} value={f}>{FUEL_LABELS[f]}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )} />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
@@ -238,11 +217,9 @@ export default function AdminVehicleForm() {
                 </CardContent>
               </Card>
 
-              {/* Conteúdo */}
+              {/* Descrição */}
               <Card className="border-0 shadow-sm">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Descrição</CardTitle>
-                </CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="text-base">Descrição</CardTitle></CardHeader>
                 <CardContent>
                   <div className="space-y-1.5">
                     <Label>Descrição do veículo</Label>
@@ -256,24 +233,18 @@ export default function AdminVehicleForm() {
                 </CardContent>
               </Card>
 
-              {/* Status */}
+              {/* Visibilidade */}
               <Card className="border-0 shadow-sm">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Visibilidade</CardTitle>
-                </CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="text-base">Visibilidade</CardTitle></CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex items-center justify-between py-1">
                     <div>
                       <p className="text-sm font-medium text-slate-700">Veículo ativo</p>
                       <p className="text-xs text-slate-400">Veículos ativos aparecem no catálogo do site</p>
                     </div>
-                    <Controller
-                      control={control}
-                      name="isActive"
-                      render={({ field }) => (
-                        <Switch checked={field.value} onCheckedChange={field.onChange} />
-                      )}
-                    />
+                    <Controller control={control} name="isActive" render={({ field }) => (
+                      <Switch checked={field.value} onCheckedChange={field.onChange} />
+                    )} />
                   </div>
                   <Separator />
                   <div className="flex items-center justify-between py-1">
@@ -281,25 +252,16 @@ export default function AdminVehicleForm() {
                       <p className="text-sm font-medium text-slate-700">Destaque na página inicial</p>
                       <p className="text-xs text-slate-400">Aparece na seção de veículos em destaque</p>
                     </div>
-                    <Controller
-                      control={control}
-                      name="isFeatured"
-                      render={({ field }) => (
-                        <Switch checked={field.value} onCheckedChange={field.onChange} />
-                      )}
-                    />
+                    <Controller control={control} name="isFeatured" render={({ field }) => (
+                      <Switch checked={field.value} onCheckedChange={field.onChange} />
+                    )} />
                   </div>
                 </CardContent>
               </Card>
 
               {/* Actions */}
               <div className="flex items-center justify-end gap-3 pt-2 pb-8">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => navigate('/admin/veiculos')}
-                  disabled={isSubmitting}
-                >
+                <Button type="button" variant="outline" onClick={() => navigate('/admin/veiculos')} disabled={isSubmitting}>
                   Cancelar
                 </Button>
                 <Button type="submit" disabled={isSubmitting || (!isDirty && isEditing)} className="gap-2 min-w-32">
@@ -311,6 +273,21 @@ export default function AdminVehicleForm() {
           )}
         </div>
       </main>
+
+      {/* Vigência modal — opened after form validation */}
+      <VigenciaModal
+        open={!!pendingFormData}
+        title={isEditing ? 'Vigência da alteração' : 'Vigência do novo veículo'}
+        description={
+          isEditing
+            ? 'Quando as alterações deste veículo devem refletir no site?'
+            : 'Quando este veículo deve aparecer no catálogo do site?'
+        }
+        confirmLabel={isEditing ? 'Salvar com vigência' : 'Cadastrar com vigência'}
+        loading={isSubmitting}
+        onClose={() => setPendingFormData(null)}
+        onConfirm={handleVigenciaConfirm}
+      />
     </AdminLayout>
   );
 }

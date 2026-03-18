@@ -8,6 +8,7 @@ import {
   History,
   LogOut,
   ChevronRight,
+  Percent,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAdminAuth } from '@/hooks/admin/useAdminAuth';
@@ -39,6 +40,11 @@ const NAV_ITEMS = [
     label: 'Histórico de Importações',
     href: '/admin/importacoes',
     icon: History,
+  },
+  {
+    label: 'Descontos',
+    href: '/admin/descontos',
+    icon: Percent,
   },
   {
     label: 'Logs do Sistema',

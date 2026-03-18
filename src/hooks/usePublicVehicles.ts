@@ -2,6 +2,8 @@
 // DrivioGo — usePublicVehicles
 // Fetches vehicles from the Supabase `vehicles` table (managed by admin) and
 // maps them to the public Vehicle interface used by all site components.
+// Respects effective_from / effective_until so admin-scheduled changes
+// automatically take effect without any code deploy.
 // Falls back to the static catalog when Supabase returns no data.
 // =============================================================================
 
@@ -23,47 +25,51 @@ function mapAdminVehicle(r: Record<string, unknown>, basePrice = 0): Vehicle {
   );
 
   const mainImage = images.find((img) => img.is_main) ?? images[0];
-  const imageUrl = (mainImage?.url as string | undefined) ?? '';
+  const imageUrl  = (mainImage?.url as string | undefined) ?? '';
   const imageUrls = images.map((img) => img.url as string);
 
-  const category = r.category as string;
+  const category     = r.category     as string;
   const transmission = r.transmission as string;
-  const fuel = r.fuel as string;
+  const fuel         = r.fuel         as string;
 
   return {
-    id: r.id as string,
-    brand: r.brand as string,
-    model: r.model as string,
-    year: r.year as number,
+    id:       r.id    as string,
+    brand:    r.brand as string,
+    model:    r.model as string,
+    year:     r.year  as number,
     bodyType: CATEGORY_LABELS[category as keyof typeof CATEGORY_LABELS] ?? category,
-    image: imageUrl,
-    images: imageUrls,
+    image:    imageUrl,
+    images:   imageUrls,
     basePrice,
     available: r.is_active as boolean,
     specs: {
-      engine: '',
-      power: '',
+      engine:       '',
+      power:        '',
       transmission: TRANSMISSION_LABELS[transmission as keyof typeof TRANSMISSION_LABELS] ?? transmission,
-      fuel: FUEL_LABELS[fuel as keyof typeof FUEL_LABELS] ?? fuel,
-      consumption: '',
-      trunk: '',
-      seats: r.seats as number,
+      fuel:         FUEL_LABELS[fuel as keyof typeof FUEL_LABELS] ?? fuel,
+      consumption:  '',
+      trunk:        '',
+      seats:        r.seats as number,
     },
-    features: (r.features as string[]) ?? [],
-    optionals: [],
+    features:    (r.features as string[]) ?? [],
+    optionals:   [],
     description: (r.description as string) ?? '',
   };
 }
 
 // ---------------------------------------------------------------------------
-// Fetch: all active vehicles + their minimum monthly price from active pricing
+// Fetch: all effective vehicles + their minimum monthly price from active pricing
+// "Effective" = effective_from <= NOW AND (effective_until IS NULL OR > NOW)
 // ---------------------------------------------------------------------------
 
 async function fetchActiveVehicles(): Promise<Vehicle[]> {
+  const now = new Date().toISOString();
+
   const { data, error } = await db
     .from('vehicles')
     .select('*, vehicle_images(*)')
-    .eq('is_active', true)
+    .lte('effective_from', now)
+    .or(`effective_until.is.null,effective_until.gt.${now}`)
     .order('featured_order', { ascending: true, nullsFirst: false })
     .order('created_at', { ascending: false });
 
@@ -76,6 +82,8 @@ async function fetchActiveVehicles(): Promise<Vehicle[]> {
     .from('pricing_table_versions')
     .select('id')
     .eq('is_active', true)
+    .or(`effective_from.is.null,effective_from.lte.${now}`)
+    .order('version_number', { ascending: false })
     .limit(1)
     .single();
 
@@ -103,7 +111,7 @@ async function fetchActiveVehicles(): Promise<Vehicle[]> {
 }
 
 // ---------------------------------------------------------------------------
-// Fetch: single vehicle by ID (UUID from admin or legacy string from static)
+// Fetch: single vehicle by ID — respects effective dates
 // ---------------------------------------------------------------------------
 
 async function fetchVehicleById(id: string): Promise<Vehicle | null> {
@@ -114,16 +122,19 @@ async function fetchVehicleById(id: string): Promise<Vehicle | null> {
     .single();
 
   if (error || !data) {
-    // Fallback: static catalog (legacy numeric IDs like "1", "2"…)
     return staticVehicles.find((v) => v.id === id) ?? null;
   }
 
   // Get min price from active pricing for this vehicle
   let basePrice = 0;
+  const now = new Date().toISOString();
+
   const { data: activeVersion } = await db
     .from('pricing_table_versions')
     .select('id')
     .eq('is_active', true)
+    .or(`effective_from.is.null,effective_from.lte.${now}`)
+    .order('version_number', { ascending: false })
     .limit(1)
     .single();
 
@@ -150,21 +161,19 @@ async function fetchVehicleById(id: string): Promise<Vehicle | null> {
 // Hooks
 // ---------------------------------------------------------------------------
 
-/** All active vehicles — used by Catalog and FeaturedVehicles. */
 export function usePublicVehicleList() {
   return useQuery<Vehicle[]>({
     queryKey: ['public', 'vehicles'],
-    queryFn: fetchActiveVehicles,
+    queryFn:  fetchActiveVehicles,
     staleTime: 60_000,
   });
 }
 
-/** Single vehicle by ID — used by VehicleDetail and Checkout. */
 export function usePublicVehicle(id: string | undefined) {
   return useQuery<Vehicle | null>({
     queryKey: ['public', 'vehicle', id],
-    queryFn: () => fetchVehicleById(id!),
-    enabled: !!id,
+    queryFn:  () => fetchVehicleById(id!),
+    enabled:  !!id,
     staleTime: 60_000,
   });
 }

@@ -6,11 +6,13 @@ import Footer from "@/components/Footer";
 import SubscriptionSimulator from "@/components/SubscriptionSimulator";
 import { usePublicVehicle } from "@/hooks/usePublicVehicles";
 import { useVehiclePricing } from "@/hooks/usePublicPricing";
+import { useBestVehicleDiscount } from "@/hooks/usePublicDiscounts";
 
 const VehicleDetail = () => {
   const { id } = useParams();
   const { data: vehicle, isLoading } = usePublicVehicle(id);
   const { data: pricingPeriods = [] } = useVehiclePricing(vehicle?.id);
+  const discount = useBestVehicleDiscount(vehicle?.id);
 
   if (isLoading) {
     return (
@@ -178,7 +180,7 @@ const VehicleDetail = () => {
 
           {/* Right: Simulator */}
           <div className="lg:sticky lg:top-28 lg:self-start">
-            <SubscriptionSimulator vehicle={vehicle} pricingPeriods={pricingPeriods} />
+            <SubscriptionSimulator vehicle={vehicle} pricingPeriods={pricingPeriods} discount={discount} />
           </div>
         </div>
       </main>

@@ -70,6 +70,10 @@ export interface Vehicle {
   isFeatured: boolean;
   featuredOrder?: number;
   images: VehicleImage[];
+  /** When the vehicle becomes visible on the public site */
+  effectiveFrom: string;
+  /** When the vehicle stops being visible (null = never) */
+  effectiveUntil?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -102,6 +106,10 @@ export interface PricingTableVersion {
   isActive: boolean;
   activatedAt?: string;
   deactivatedAt?: string;
+  /** Scheduled effective date — null means immediate / already in effect */
+  effectiveFrom?: string | null;
+  /** Derived: isActive=true AND effectiveFrom > NOW() */
+  isScheduled?: boolean;
   createdAt: string;
   createdById: string;
   createdByName?: string;
@@ -241,6 +249,47 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   LOGOUT: 'Saiu',
   PASSWORD_CHANGE: 'Alterou senha',
 };
+
+// ---------------------------------------------------------------------------
+// Discount types
+
+export type DiscountScope = 'ALL' | 'TABLE' | 'VEHICLE';
+
+export interface Discount {
+  id:              string;
+  name:            string;
+  description?:    string;
+  percentage:      number;
+  scope:           DiscountScope;
+  pricingTableId?: string | null;
+  /** Vehicle IDs when scope = 'VEHICLE' */
+  vehicleIds:      string[];
+  isHighlighted:   boolean;
+  isActive:        boolean;
+  effectiveFrom:   string;
+  effectiveUntil?: string | null;
+  createdAt:       string;
+  updatedAt:       string;
+}
+
+export interface DiscountFormData {
+  name:            string;
+  description:     string;
+  percentage:      number;
+  scope:           DiscountScope;
+  pricingTableId:  string;
+  vehicleIds:      string[];
+  isHighlighted:   boolean;
+  isActive:        boolean;
+}
+
+export const DISCOUNT_SCOPE_LABELS: Record<DiscountScope, string> = {
+  ALL:     'Todas as tabelas',
+  TABLE:   'Tabela específica',
+  VEHICLE: 'Veículos específicos',
+};
+
+// ---------------------------------------------------------------------------
 
 export const ENTITY_TYPE_LABELS: Record<string, string> = {
   Vehicle: 'Veículo',

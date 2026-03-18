@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import type { Vehicle } from "@/data/vehicles";
 import type { PublicPricingPeriod } from "@/hooks/usePublicPricing";
+import type { PublicDiscount } from "@/hooks/usePublicDiscounts";
 
 // Fallback pricing used when no admin pricing data is available
 const FALLBACK_PERIODS = [
@@ -22,9 +23,11 @@ interface Props {
   /** Real pricing periods from the active admin pricing table. When provided,
    *  exact monthly prices are shown. When absent, falls back to basePrice × factor. */
   pricingPeriods?: PublicPricingPeriod[];
+  /** Best applicable discount for this vehicle */
+  discount?: PublicDiscount | null;
 }
 
-const SubscriptionSimulator = ({ vehicle, pricingPeriods }: Props) => {
+const SubscriptionSimulator = ({ vehicle, pricingPeriods, discount }: Props) => {
   const navigate = useNavigate();
   const [periodIdx, setPeriodIdx] = useState(0);
   const [mileageIdx, setMileageIdx] = useState(0);
@@ -39,7 +42,7 @@ const SubscriptionSimulator = ({ vehicle, pricingPeriods }: Props) => {
   // Derive display data from real pricing or fallback
   let displayPeriods: { months: number; label: string }[];
   let displayMileages: { km: number; label: string }[];
-  let price: number;
+  let basePrice: number;
 
   if (hasRealPricing) {
     displayPeriods = pricingPeriods!.map((p) => ({ months: p.months, label: p.label }));
@@ -48,11 +51,11 @@ const SubscriptionSimulator = ({ vehicle, pricingPeriods }: Props) => {
       km: km.monthlyKm,
       label: km.label,
     }));
-    price = selectedPeriod?.kmOptions[mileageIdx]?.price ?? 0;
+    basePrice = selectedPeriod?.kmOptions[mileageIdx]?.price ?? 0;
   } else {
     displayPeriods = FALLBACK_PERIODS;
     displayMileages = FALLBACK_MILEAGES;
-    price = Math.round(
+    basePrice = Math.round(
       vehicle.basePrice * FALLBACK_PERIODS[periodIdx].factor +
         FALLBACK_MILEAGES[mileageIdx].factor,
     );
@@ -61,12 +64,31 @@ const SubscriptionSimulator = ({ vehicle, pricingPeriods }: Props) => {
   const safePeriodIdx = Math.min(periodIdx, displayPeriods.length - 1);
   const safeMileageIdx = Math.min(mileageIdx, displayMileages.length - 1);
 
+  const discountedPrice =
+    discount && basePrice > 0
+      ? Math.round(basePrice * (1 - discount.percentage / 100))
+      : null;
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       className="rounded-xl border border-border bg-card p-6 shadow-card"
     >
+      {/* Highlighted discount banner */}
+      {discount?.isHighlighted && (
+        <div className="mb-4 flex items-center gap-2 rounded-lg bg-red-50 border border-red-200 px-4 py-3">
+          <span className="text-xl">🏷️</span>
+          <div>
+            <p className="text-sm font-bold text-red-600">{discount.name}</p>
+            <p className="text-xs text-red-500">
+              {discount.percentage}% de desconto aplicado neste veículo
+              {discount.description ? ` — ${discount.description}` : ""}
+            </p>
+          </div>
+        </div>
+      )}
+
       <h3 className="mb-6 font-display text-xl font-bold text-foreground">Simule sua assinatura</h3>
 
       {/* Period */}
@@ -118,11 +140,26 @@ const SubscriptionSimulator = ({ vehicle, pricingPeriods }: Props) => {
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Valor mensal
         </p>
-        {price > 0 ? (
-          <p className="mt-2 font-display text-4xl font-bold text-primary">
-            R$ {price.toLocaleString("pt-BR")}
-            <span className="text-base font-normal text-muted-foreground">/mês</span>
-          </p>
+        {basePrice > 0 ? (
+          discountedPrice ? (
+            <>
+              <p className="mt-2 text-base text-muted-foreground line-through">
+                R$ {basePrice.toLocaleString("pt-BR")}/mês
+              </p>
+              <p className="font-display text-4xl font-bold text-red-500">
+                R$ {discountedPrice.toLocaleString("pt-BR")}
+                <span className="text-base font-normal text-muted-foreground">/mês</span>
+              </p>
+              <p className="mt-1 text-xs font-semibold text-red-500">
+                Economia de R$ {(basePrice - discountedPrice).toLocaleString("pt-BR")}/mês
+              </p>
+            </>
+          ) : (
+            <p className="mt-2 font-display text-4xl font-bold text-primary">
+              R$ {basePrice.toLocaleString("pt-BR")}
+              <span className="text-base font-normal text-muted-foreground">/mês</span>
+            </p>
+          )
         ) : (
           <p className="mt-2 font-display text-2xl font-bold text-muted-foreground">
             Consulte

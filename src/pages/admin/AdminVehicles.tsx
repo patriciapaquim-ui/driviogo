@@ -1,25 +1,36 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, Pencil, Trash2, ToggleLeft, ToggleRight, Car } from 'lucide-react';
+import { Plus, Search, Pencil, ToggleLeft, ToggleRight, Car, CalendarClock, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { AdminLayout } from '@/components/admin/layout/AdminLayout';
 import { AdminHeader } from '@/components/admin/layout/AdminHeader';
 import { ActiveBadge } from '@/components/admin/shared/StatusBadge';
-import { ConfirmationModal } from '@/components/admin/shared/ConfirmationModal';
 import { PageHeader } from '@/components/admin/shared/PageHeader';
 import { EmptyState } from '@/components/admin/shared/EmptyState';
 import { Pagination } from '@/components/admin/shared/Pagination';
+import { VigenciaModal } from '@/components/admin/shared/VigenciaModal';
 import { useVehicles } from '@/hooks/admin/useVehicles';
 import { usePagination } from '@/hooks/admin/usePagination';
 import { CATEGORY_LABELS, FUEL_LABELS } from '@/types/admin';
 import type { Vehicle, VehicleCategory } from '@/types/admin';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 const CATEGORIES: VehicleCategory[] = ['HATCH', 'SEDAN', 'SUV', 'PICKUP', 'MINIVAN', 'ESPORTIVO', 'ELETRICO'];
 const LIMIT = 15;
+
+const formatDate = (iso: string) =>
+  format(new Date(iso), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR });
+
+type PendingAction =
+  | { type: 'toggle'; vehicle: Vehicle; targetActive: boolean }
+  | { type: 'deactivate'; vehicle: Vehicle };
 
 export default function AdminVehicles() {
   const navigate = useNavigate();
@@ -27,12 +38,11 @@ export default function AdminVehicles() {
   const [search,         setSearch]         = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [statusFilter,   setStatusFilter]   = useState<string>('all');
-  const [deleteTarget,   setDeleteTarget]   = useState<Vehicle | null>(null);
-  const [deleting,       setDeleting]       = useState(false);
+  const [pendingAction,  setPendingAction]  = useState<PendingAction | null>(null);
 
   const { page, goToPage, resetPage } = usePagination();
 
-  const { vehicles, total, totalPages, loading, deleteVehicle, toggleActive } = useVehicles({
+  const { vehicles, total, totalPages, loading, deactivateVehicle, toggleActive, isDeactivating } = useVehicles({
     page,
     limit:    LIMIT,
     search:   search || undefined,
@@ -40,28 +50,37 @@ export default function AdminVehicles() {
     isActive: statusFilter === 'active' ? true : statusFilter === 'inactive' ? false : undefined,
   });
 
-  const handleSearchChange = (value: string) => {
-    setSearch(value);
-    resetPage();
+  const handleSearchChange = (value: string) => { setSearch(value); resetPage(); };
+  const handleCategoryChange = (value: string) => { setCategoryFilter(value); resetPage(); };
+  const handleStatusChange = (value: string) => { setStatusFilter(value); resetPage(); };
+
+  const handleVigenciaConfirm = async (effectiveFrom: Date | null) => {
+    if (!pendingAction) return;
+
+    if (pendingAction.type === 'toggle') {
+      await toggleActive(pendingAction.vehicle.id, pendingAction.targetActive, effectiveFrom);
+    } else {
+      await deactivateVehicle(pendingAction.vehicle.id, effectiveFrom);
+    }
+
+    setPendingAction(null);
   };
 
-  const handleCategoryChange = (value: string) => {
-    setCategoryFilter(value);
-    resetPage();
-  };
+  const vigenciaTitle = pendingAction?.type === 'deactivate'
+    ? `Desativar — ${pendingAction.vehicle.brand} ${pendingAction.vehicle.model}`
+    : pendingAction?.type === 'toggle'
+      ? `${pendingAction.targetActive ? 'Ativar' : 'Desativar'} — ${pendingAction.vehicle.brand} ${pendingAction.vehicle.model}`
+      : '';
 
-  const handleStatusChange = (value: string) => {
-    setStatusFilter(value);
-    resetPage();
-  };
+  const vigenciaDescription = pendingAction?.type === 'deactivate'
+    ? 'O veículo será removido do catálogo. Nenhum dado é excluído — a vigência controla a visibilidade.'
+    : 'Selecione quando essa alteração de status deve refletir no site.';
 
-  const handleDelete = async () => {
-    if (!deleteTarget) return;
-    setDeleting(true);
-    await deleteVehicle(deleteTarget.id);
-    setDeleting(false);
-    setDeleteTarget(null);
-  };
+  const now = new Date();
+  const isScheduled = (v: Vehicle) =>
+    v.effectiveFrom && new Date(v.effectiveFrom) > now;
+  const isExpired = (v: Vehicle) =>
+    v.effectiveUntil && new Date(v.effectiveUntil) <= now;
 
   return (
     <AdminLayout>
@@ -122,7 +141,7 @@ export default function AdminVehicles() {
                 <TableHead>Veículo</TableHead>
                 <TableHead>Categoria</TableHead>
                 <TableHead>Combustível</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead>Status / Vigência</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
               </TableRow>
             </TableHeader>
@@ -134,7 +153,7 @@ export default function AdminVehicles() {
                     <TableCell><Skeleton className="h-4 w-40" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-16" /></TableCell>
-                    <TableCell><Skeleton className="h-5 w-14 rounded-full" /></TableCell>
+                    <TableCell><Skeleton className="h-5 w-24 rounded-full" /></TableCell>
                     <TableCell><Skeleton className="h-8 w-24 ml-auto" /></TableCell>
                   </TableRow>
                 ))
@@ -151,16 +170,15 @@ export default function AdminVehicles() {
               ) : (
                 vehicles.map((vehicle) => {
                   const mainImage = vehicle.images.find((i) => i.isMain) ?? vehicle.images[0];
+                  const scheduled = isScheduled(vehicle);
+                  const expired   = isExpired(vehicle);
+
                   return (
                     <TableRow key={vehicle.id} className="hover:bg-slate-50/60">
                       <TableCell>
                         <div className="w-10 h-10 rounded-lg bg-slate-100 overflow-hidden">
                           {mainImage ? (
-                            <img
-                              src={mainImage.url}
-                              alt={mainImage.altText ?? vehicle.model}
-                              className="w-full h-full object-cover"
-                            />
+                            <img src={mainImage.url} alt={mainImage.altText ?? vehicle.model} className="w-full h-full object-cover" />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center">
                               <Car className="w-4 h-4 text-slate-300" />
@@ -169,39 +187,66 @@ export default function AdminVehicles() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <p className="font-medium text-slate-800">
-                          {vehicle.brand} {vehicle.model}
-                        </p>
-                        <p className="text-xs text-slate-400">
-                          {vehicle.year} · {vehicle.version ?? '—'}
-                        </p>
+                        <p className="font-medium text-slate-800">{vehicle.brand} {vehicle.model}</p>
+                        <p className="text-xs text-slate-400">{vehicle.year} · {vehicle.version ?? '—'}</p>
                       </TableCell>
-                      <TableCell className="text-sm text-slate-600">
-                        {CATEGORY_LABELS[vehicle.category]}
-                      </TableCell>
-                      <TableCell className="text-sm text-slate-600">
-                        {FUEL_LABELS[vehicle.fuel]}
-                      </TableCell>
+                      <TableCell className="text-sm text-slate-600">{CATEGORY_LABELS[vehicle.category]}</TableCell>
+                      <TableCell className="text-sm text-slate-600">{FUEL_LABELS[vehicle.fuel]}</TableCell>
                       <TableCell>
-                        <ActiveBadge isActive={vehicle.isActive} />
+                        <div className="space-y-1">
+                          <ActiveBadge isActive={vehicle.isActive && !expired} />
+                          {scheduled && (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Badge variant="outline" className="gap-1 text-xs border-amber-300 text-amber-700 bg-amber-50">
+                                    <CalendarClock className="w-3 h-3" />
+                                    Agendado
+                                  </Badge>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  Entra em vigor em {formatDate(vehicle.effectiveFrom)}
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          )}
+                          {expired && (
+                            <Badge variant="outline" className="text-xs border-red-300 text-red-600 bg-red-50">
+                              Expirado em {formatDate(vehicle.effectiveUntil!)}
+                            </Badge>
+                          )}
+                          {vehicle.effectiveUntil && !expired && (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Badge variant="outline" className="gap-1 text-xs border-orange-300 text-orange-700 bg-orange-50">
+                                    <CalendarClock className="w-3 h-3" />
+                                    Saída agendada
+                                  </Badge>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  Sai do catálogo em {formatDate(vehicle.effectiveUntil!)}
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center justify-end gap-1">
                           <Button
-                            variant="ghost"
-                            size="icon"
+                            variant="ghost" size="icon"
                             className="w-8 h-8 text-slate-400 hover:text-slate-700"
                             title={vehicle.isActive ? 'Desativar' : 'Ativar'}
-                            onClick={() => toggleActive(vehicle.id, !vehicle.isActive)}
+                            onClick={() => setPendingAction({ type: 'toggle', vehicle, targetActive: !vehicle.isActive })}
                           >
-                            {vehicle.isActive
+                            {vehicle.isActive && !expired
                               ? <ToggleRight className="w-4 h-4 text-emerald-500" />
                               : <ToggleLeft className="w-4 h-4" />
                             }
                           </Button>
                           <Button
-                            variant="ghost"
-                            size="icon"
+                            variant="ghost" size="icon"
                             className="w-8 h-8 text-slate-400 hover:text-slate-700"
                             title="Editar"
                             onClick={() => navigate(`/admin/veiculos/${vehicle.id}/editar`)}
@@ -209,11 +254,10 @@ export default function AdminVehicles() {
                             <Pencil className="w-4 h-4" />
                           </Button>
                           <Button
-                            variant="ghost"
-                            size="icon"
+                            variant="ghost" size="icon"
                             className="w-8 h-8 text-slate-400 hover:text-red-600"
-                            title="Excluir"
-                            onClick={() => setDeleteTarget(vehicle)}
+                            title="Remover do catálogo"
+                            onClick={() => setPendingAction({ type: 'deactivate', vehicle })}
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>
@@ -227,28 +271,18 @@ export default function AdminVehicles() {
           </Table>
         </div>
 
-        <Pagination
-          page={page}
-          totalPages={totalPages}
-          total={total}
-          limit={LIMIT}
-          onPage={goToPage}
-        />
+        <Pagination page={page} totalPages={totalPages} total={total} limit={LIMIT} onPage={goToPage} />
       </main>
 
-      <ConfirmationModal
-        open={!!deleteTarget}
-        onClose={() => setDeleteTarget(null)}
-        onConfirm={handleDelete}
-        title="Excluir veículo"
-        description={
-          deleteTarget
-            ? `Tem certeza que deseja excluir "${deleteTarget.brand} ${deleteTarget.model}"? Essa ação não pode ser desfeita.`
-            : ''
-        }
-        confirmLabel="Sim, excluir"
-        variant="destructive"
-        loading={deleting}
+      {/* Vigência modal for toggle/deactivate */}
+      <VigenciaModal
+        open={!!pendingAction}
+        title={vigenciaTitle}
+        description={vigenciaDescription}
+        confirmLabel={pendingAction?.type === 'deactivate' ? 'Confirmar remoção' : 'Confirmar'}
+        loading={isDeactivating}
+        onClose={() => setPendingAction(null)}
+        onConfirm={handleVigenciaConfirm}
       />
     </AdminLayout>
   );
