@@ -28,6 +28,7 @@ import AdminImport from "./pages/admin/AdminImport";
 import AdminImportHistory from "./pages/admin/AdminImportHistory";
 import AdminLogs from "./pages/admin/AdminLogs";
 import AdminDiscounts from "./pages/admin/AdminDiscounts";
+import AdminSetup from "./pages/admin/AdminSetup";
 
 const queryClient = new QueryClient();
 
@@ -53,6 +54,7 @@ const App = () => (
               {/* ── Admin routes ──────────────────────────────── */}
               <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
               <Route path="/admin/login" element={<AdminLogin />} />
+              <Route path="/admin/setup" element={<AdminSetup />} />
 
               <Route
                 path="/admin/dashboard"
