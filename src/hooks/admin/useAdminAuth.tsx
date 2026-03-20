@@ -2,6 +2,12 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import { supabase } from '@/integrations/supabase/client';
 import type { AdminRole } from '@/types/admin';
 
+// ─── Demo / bypass mode ───────────────────────────────────────────────────────
+// Set to true to skip authentication entirely and present the admin module
+// with a mock super-admin session (no database required).
+const ADMIN_BYPASS = true;
+// ─────────────────────────────────────────────────────────────────────────────
+
 interface AdminUserRow {
   role: AdminRole;
   name: string;
@@ -25,11 +31,11 @@ const AdminAuthContext = createContext<AdminAuthContextType | undefined>(undefin
 const db = supabase as any;
 
 export const AdminAuthProvider = ({ children }: { children: ReactNode }) => {
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [role, setRole] = useState<AdminRole | null>(null);
-  const [adminName, setAdminName] = useState('');
-  const [adminEmail, setAdminEmail] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(ADMIN_BYPASS);
+  const [role, setRole] = useState<AdminRole | null>(ADMIN_BYPASS ? 'SUPER_ADMIN' : null);
+  const [adminName, setAdminName] = useState(ADMIN_BYPASS ? 'Admin Demo' : '');
+  const [adminEmail, setAdminEmail] = useState(ADMIN_BYPASS ? 'admin_drivio@driviogo.com' : '');
+  const [loading, setLoading] = useState(!ADMIN_BYPASS);
 
   const checkAdminSession = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -67,6 +73,7 @@ export const AdminAuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   useEffect(() => {
+    if (ADMIN_BYPASS) return;
     checkAdminSession();
     const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
       checkAdminSession();
@@ -75,6 +82,7 @@ export const AdminAuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const signIn = async (email: string, password: string): Promise<{ error: string | null }> => {
+    if (ADMIN_BYPASS) return { error: null };
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
       if (error.message.includes('Invalid login credentials')) {
@@ -96,6 +104,7 @@ export const AdminAuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signOut = async () => {
+    if (ADMIN_BYPASS) return;
     await supabase.auth.signOut();
     setIsAdmin(false);
     setRole(null);
